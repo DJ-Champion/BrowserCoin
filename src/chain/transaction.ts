@@ -1,7 +1,7 @@
 import { sign as edSign, verify as edVerify, type PrivateKey, type PublicKey, type Signature } from '../crypto/keys.js';
 import { sha256 } from '../crypto/hash.js';
 import { concat, u32be, u64be, readU32be, readU64be, bytesToHex } from '../util/binary.js';
-import { CHAIN_ID } from './genesis.js';
+import { CHAIN_ID, MAX_MONEY } from './genesis.js';
 
 export interface Transaction {
   from: PublicKey;     // 32 bytes
@@ -64,10 +64,13 @@ export function verifyTxSignature(tx: Transaction): boolean {
   return edVerify(tx.signature, txPreimage(tx), tx.from);
 }
 
-/** Structural sanity checks: amounts non-negative, no self-send, etc. */
+/** Structural sanity checks: amounts non-negative, capped at MAX_MONEY, no self-send, etc. */
 export function validateTxStructure(tx: Transaction): string | null {
   if (tx.amount < 0n) return 'amount negative';
   if (tx.fee < 0n) return 'fee negative';
+  if (tx.amount > MAX_MONEY) return 'amount exceeds MAX_MONEY';
+  if (tx.fee > MAX_MONEY) return 'fee exceeds MAX_MONEY';
+  if (tx.amount + tx.fee > MAX_MONEY) return 'amount + fee exceeds MAX_MONEY';
   if (tx.amount === 0n && tx.fee === 0n) return 'tx has no value';
   if (tx.nonce < 0 || !Number.isInteger(tx.nonce)) return 'nonce invalid';
   if (bytesToHex(tx.from) === bytesToHex(tx.to)) return 'self-send forbidden';

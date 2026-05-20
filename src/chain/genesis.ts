@@ -10,6 +10,14 @@ export const COIN = 100_000_000n;
 export const INITIAL_REWARD = 50n * COIN;
 export const HALVING_INTERVAL = 210_000;
 
+/**
+ * Hard cap on any single monetary value in a transaction. Post-Bitcoin-2010
+ * defense-in-depth — bigint can't overflow, but capping fields makes the
+ * "impossible" attack literally inexpressible. Equal to max supply (21M),
+ * so no tx can claim more value than will ever exist on the chain.
+ */
+export const MAX_MONEY = 21_000_000n * COIN;
+
 /** Target one block every 2.5 minutes (150 s) — 4x faster than Bitcoin. */
 export const TARGET_BLOCK_TIME_S = 150;
 

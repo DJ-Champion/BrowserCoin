@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { Blockchain } from './blockchain.js';
 import { Mempool } from './mempool.js';
-import { blockReward, COIN } from './genesis.js';
-import { signTx } from './transaction.js';
+import { blockReward, COIN, MAX_MONEY } from './genesis.js';
+import { signTx, validateTxStructure } from './transaction.js';
 import { generateKeyPair } from '../crypto/keys.js';
 import { getAccount } from './state.js';
 import { checkPoW } from './consensus.js';
@@ -108,6 +108,40 @@ describe('blockchain', () => {
       alice.privateKey,
     );
     await expect(buildBlock(chain, alice.publicKey, [tx])).rejects.toThrow(/insufficient balance/);
+  });
+
+  it('rejects txs that exceed MAX_MONEY (defense-in-depth vs Bitcoin 2010 overflow bug)', () => {
+    const alice = generateKeyPair();
+    const bob = generateKeyPair();
+
+    // amount alone exceeds MAX_MONEY
+    const tooMuchAmount = signTx(
+      { from: alice.publicKey, to: bob.publicKey, amount: MAX_MONEY + 1n, fee: 0n, nonce: 0 },
+      alice.privateKey,
+    );
+    expect(validateTxStructure(tooMuchAmount)).toMatch(/amount exceeds MAX_MONEY/);
+
+    // fee alone exceeds MAX_MONEY
+    const tooMuchFee = signTx(
+      { from: alice.publicKey, to: bob.publicKey, amount: 1n, fee: MAX_MONEY + 1n, nonce: 0 },
+      alice.privateKey,
+    );
+    expect(validateTxStructure(tooMuchFee)).toMatch(/fee exceeds MAX_MONEY/);
+
+    // amount + fee exceeds MAX_MONEY (each individually under cap)
+    const halfPlus = (MAX_MONEY / 2n) + 1n;
+    const sumOverflow = signTx(
+      { from: alice.publicKey, to: bob.publicKey, amount: halfPlus, fee: halfPlus, nonce: 0 },
+      alice.privateKey,
+    );
+    expect(validateTxStructure(sumOverflow)).toMatch(/amount \+ fee exceeds MAX_MONEY/);
+
+    // The exact-MAX-MONEY edge case is permitted.
+    const atCap = signTx(
+      { from: alice.publicKey, to: bob.publicKey, amount: MAX_MONEY, fee: 0n, nonce: 0 },
+      alice.privateKey,
+    );
+    expect(validateTxStructure(atCap)).toBeNull();
   });
 
   it('rejects a block containing a tx with a forged signature', async () => {
