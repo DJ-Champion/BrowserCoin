@@ -8,7 +8,18 @@ import {
   type BlockHeader,
 } from './block.js';
 import { blockWork, checkPoW, medianTimePast, nextDifficulty } from './consensus.js';
-import { DIFFICULTY_WINDOW, GENESIS, MAX_BLOCK_BYTES, MAX_FUTURE_TIME_S } from './genesis.js';
+import {
+  DIFFICULTY_WINDOW,
+  GENESIS,
+  MAX_BLOCK_BYTES,
+  MAX_FUTURE_TIME_S,
+  MTP_WINDOW,
+} from './genesis.js';
+
+// Retarget reads up to DIFFICULTY_WINDOW headers, and MTP at the window
+// start reads MTP_WINDOW headers ending there — so we need that many
+// extras before the window for the start-MTP to be accurate.
+const RETARGET_LOOKBACK = DIFFICULTY_WINDOW + MTP_WINDOW - 1;
 import {
   applyBlockTxs,
   cloneState,
@@ -116,7 +127,8 @@ export class Blockchain {
     if (blockSize(block) > MAX_BLOCK_BYTES) return 'block too large';
 
     // Difficulty must match what the chain expects at this height.
-    const expectedDiff = nextDifficulty(header.height, this.getRecentHeaders(DIFFICULTY_WINDOW, parentHashHex));
+    const lookbackHeaders = this.getRecentHeaders(RETARGET_LOOKBACK, parentHashHex);
+    const expectedDiff = nextDifficulty(header.height, lookbackHeaders, header.timestamp);
     if (header.difficulty !== expectedDiff) {
       return `bad difficulty (expected ${expectedDiff.toString(16)} got ${header.difficulty.toString(16)})`;
     }
@@ -124,7 +136,7 @@ export class Blockchain {
     // Timestamp rules.
     const now = Math.floor(Date.now() / 1000);
     if (header.timestamp > now + MAX_FUTURE_TIME_S) return 'timestamp too far in future';
-    const mtp = medianTimePast(this.getRecentHeaders(11, parentHashHex));
+    const mtp = medianTimePast(this.getRecentHeaders(MTP_WINDOW, parentHashHex));
     if (mtp > 0 && header.timestamp <= mtp) return 'timestamp not above median-time-past';
 
     // PoW.

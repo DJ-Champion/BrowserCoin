@@ -3,9 +3,12 @@ import { compactToTarget, hashMeetsTarget, targetToCompact } from '../util/binar
 import { encodeHeader, type BlockHeader } from './block.js';
 import {
   DIFFICULTY_WINDOW,
+  EMERGENCY_DROP_MULT,
   GENESIS_DIFFICULTY_COMPACT,
-  MAX_RETARGET_FACTOR,
+  MAX_RETARGET_FACTOR_DOWN,
+  MAX_RETARGET_FACTOR_UP,
   MAX_TARGET,
+  MTP_WINDOW,
   TARGET_BLOCK_TIME_S,
 } from './genesis.js';
 
@@ -13,7 +16,7 @@ import {
  * True if the header's PoW hash is below its claimed target.
  *
  * Uses memory-hard Argon2id (not the block-ID sha256). One verify costs
- * ~10-30 ms on a laptop — acceptable since blocks arrive every ~150 s.
+ * ~80–250 ms on a laptop — acceptable since blocks arrive every ~150 s.
  */
 export async function checkPoW(header: BlockHeader): Promise<boolean> {
   const target = compactToTarget(header.difficulty);
@@ -23,53 +26,80 @@ export async function checkPoW(header: BlockHeader): Promise<boolean> {
 }
 
 /**
- * Decide the difficulty (compact form) that the block at `nextHeight` should use.
+ * Decide the difficulty (compact form) that the block at `nextHeight` should
+ * use. Caller passes the candidate block's intended timestamp so the
+ * emergency-drop rule can fire.
  *
- * Per-block retargeting with a sliding window. Every block adjusts difficulty
- * based on the average block time over the last `DIFFICULTY_WINDOW` blocks,
- * clamped to ±MAX_RETARGET_FACTOR× per step.
+ * Per-block retargeting with a sliding window. Defenses against hashrate
+ * gaming and timestamp manipulation:
+ *   1. The "actual span" is measured between two MEDIAN-TIME-PAST values —
+ *      one at the window start and one at the window end — instead of raw
+ *      header timestamps. A miner who lies on a single timestamp moves MTP
+ *      by less than 1/11 of the lie.
+ *   2. The retarget step is asymmetric: target may shrink by at most
+ *      MAX_RETARGET_FACTOR_UP per block (difficulty rises slowly) but may
+ *      grow by up to MAX_RETARGET_FACTOR_DOWN per block (difficulty falls
+ *      quickly). An attacker who spikes hashrate can't pin difficulty high
+ *      after they leave.
+ *   3. Emergency drop: if the candidate's timestamp is more than
+ *      EMERGENCY_DROP_MULT × target seconds past the parent's timestamp,
+ *      the chain is treated as stalled and difficulty halves immediately.
  *
- * Why per-block instead of Bitcoin-style periodic batches: browser hashrate
- * varies 100× across user devices and swings hard when tabs join/leave. A
- * periodic batch retarget (Bitcoin's 2016 cadence) would leave the chain mining
- * at the wrong speed for ages before correcting. Per-block makes the chain
- * self-calibrate within ~5–10 blocks of any hashrate change.
- *
- * `previousHeaders` must contain at least the most recent DIFFICULTY_WINDOW
- * headers (sorted ascending), OR be the entire chain so far if shorter.
+ * `previousHeaders` should contain the parent chain headers, sorted
+ * ascending. The function reads up to DIFFICULTY_WINDOW + MTP_WINDOW − 1
+ * of them.
  */
-export function nextDifficulty(nextHeight: number, previousHeaders: BlockHeader[]): number {
+export function nextDifficulty(
+  nextHeight: number,
+  previousHeaders: BlockHeader[],
+  candidateTimestamp?: number,
+): number {
   if (nextHeight === 0) return GENESIS_DIFFICULTY_COMPACT;
   const prev = previousHeaders[previousHeaders.length - 1]!;
+  const prevTarget = compactToTarget(prev.difficulty);
 
-  // Need at least 2 *non-genesis* blocks to measure a real block-time delta.
-  // Genesis has a hardcoded past timestamp so it never participates in the
-  // calculation. With genesis at index 0, that means chain length ≥ 3.
-  if (previousHeaders.length < 3) return prev.difficulty;
-
-  // Sliding window: last DIFFICULTY_WINDOW headers.
-  let lookback = Math.min(DIFFICULTY_WINDOW, previousHeaders.length);
-  let first = previousHeaders[previousHeaders.length - lookback]!;
-
-  // If genesis is the start of the window, drop it — its hardcoded 2023
-  // timestamp would make the apparent block-time span look like "years"
-  // and the formula would incorrectly soften difficulty.
-  if (first.height === 0) {
-    lookback -= 1;
-    first = previousHeaders[previousHeaders.length - lookback]!;
+  // Emergency drop fires even before we have a full window. Useful at chain
+  // bootstrap when hashrate is wildly underestimated.
+  if (
+    candidateTimestamp !== undefined &&
+    candidateTimestamp - prev.timestamp > EMERGENCY_DROP_MULT * TARGET_BLOCK_TIME_S
+  ) {
+    let dropped = prevTarget * 2n;
+    if (dropped > MAX_TARGET) dropped = MAX_TARGET;
+    return targetToCompact(dropped);
   }
 
-  const actualSpan = Math.max(1, prev.timestamp - first.timestamp);
+  // Need at least 2 *non-genesis* blocks to measure a real block-time delta.
+  // Genesis has a hardcoded past timestamp so it never participates.
+  if (previousHeaders.length < 3) return prev.difficulty;
+
+  // Sliding window: last DIFFICULTY_WINDOW headers (after skipping genesis if
+  // it would land at the window start).
+  let lookback = Math.min(DIFFICULTY_WINDOW, previousHeaders.length);
+  let firstIdx = previousHeaders.length - lookback;
+  let first = previousHeaders[firstIdx]!;
+  if (first.height === 0) {
+    firstIdx += 1;
+    lookback -= 1;
+    first = previousHeaders[firstIdx]!;
+  }
+
   const blockCount = Math.max(1, prev.height - first.height);
   const expectedSpan = TARGET_BLOCK_TIME_S * blockCount;
 
-  const prevTarget = compactToTarget(prev.difficulty);
+  // MTP at both ends of the window. The "...UpTo" helper takes the median of
+  // up to MTP_WINDOW headers ending at and including a given index.
+  const endMTP = mtpUpTo(previousHeaders, previousHeaders.length - 1);
+  const startMTP = mtpUpTo(previousHeaders, firstIdx);
+  const actualSpan = Math.max(1, endMTP - startMTP);
 
-  // new_target = prev_target * actual / expected. Clamp [/MAX_RETARGET_FACTOR, *MAX_RETARGET_FACTOR].
-  const clampedActual = Math.max(
-    Math.floor(expectedSpan / MAX_RETARGET_FACTOR),
-    Math.min(expectedSpan * MAX_RETARGET_FACTOR, actualSpan),
-  );
+  // Clamp actualSpan so the resulting target moves at most:
+  //   * by /MAX_RETARGET_FACTOR_UP when blocks are too fast (target shrinks)
+  //   * by *MAX_RETARGET_FACTOR_DOWN when blocks are too slow (target grows)
+  const minActual = Math.floor(expectedSpan / MAX_RETARGET_FACTOR_UP);
+  const maxActual = expectedSpan * MAX_RETARGET_FACTOR_DOWN;
+  const clampedActual = Math.max(minActual, Math.min(maxActual, actualSpan));
+
   let newTarget = (prevTarget * BigInt(clampedActual)) / BigInt(expectedSpan);
   if (newTarget > MAX_TARGET) newTarget = MAX_TARGET;
   if (newTarget < 1n) newTarget = 1n;
@@ -83,17 +113,25 @@ export function nextDifficulty(nextHeight: number, previousHeaders: BlockHeader[
 export function blockWork(difficultyCompact: number): bigint {
   const target = compactToTarget(difficultyCompact);
   if (target <= 0n) return 0n;
-  // (2^256) / (target + 1) — +1 avoids div-by-zero and matches Bitcoin's formula.
   return (1n << 256n) / (target + 1n);
 }
 
 /**
- * Median of the previous 11 block timestamps. Bitcoin's "median-time-past" rule
- * prevents miners from grinding low timestamps to make difficulty easier.
+ * Median of the previous MTP_WINDOW block timestamps ending at `endIdx`
+ * (inclusive). Bitcoin's "median-time-past" rule prevents miners from
+ * grinding individual timestamps to game difficulty or pass timestamp
+ * validation.
  */
-export function medianTimePast(previousHeaders: BlockHeader[]): number {
-  const take = previousHeaders.slice(-11);
-  if (take.length === 0) return 0;
-  const ts = take.map((h) => h.timestamp).sort((a, b) => a - b);
+function mtpUpTo(headers: BlockHeader[], endIdx: number): number {
+  const start = Math.max(0, endIdx - MTP_WINDOW + 1);
+  const ts: number[] = [];
+  for (let i = start; i <= endIdx; i++) ts.push(headers[i]!.timestamp);
+  ts.sort((a, b) => a - b);
   return ts[Math.floor(ts.length / 2)]!;
+}
+
+/** Public wrapper for block-validation use. Reads the most recent MTP_WINDOW headers. */
+export function medianTimePast(previousHeaders: BlockHeader[]): number {
+  if (previousHeaders.length === 0) return 0;
+  return mtpUpTo(previousHeaders, previousHeaders.length - 1);
 }

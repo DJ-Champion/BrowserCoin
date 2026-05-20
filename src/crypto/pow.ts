@@ -5,8 +5,10 @@ import { argon2id } from 'hash-wasm';
  *
  * Block IDs / prevHash links still use sha256() (see crypto/hash.ts) — this
  * function is only called from the miner grind loop and from consensus
- * verification. GPUs choke on the 16 MB per-hash memory footprint, which is
- * the whole point.
+ * verification. 64 MB per-hash with 2 iterations puts the bottleneck on RAM
+ * bandwidth, which is the closest browser-friendly analogue to ASIC
+ * resistance — server attackers can't cheaply scale memory bandwidth the way
+ * they can scale cores.
  */
 
 // Network-wide fixed salt. The version suffix gives a clean hard-fork path:
@@ -14,8 +16,8 @@ import { argon2id } from 'hash-wasm';
 const SALT = new TextEncoder().encode('browsercoin-pow-v1');
 
 export const POW_PARAMS = {
-  memorySize: 16 * 1024, // KiB → 16 MB
-  iterations: 1,
+  memorySize: 64 * 1024, // KiB → 64 MB
+  iterations: 2,
   parallelism: 1,
   hashLength: 32,
 } as const;

@@ -2,7 +2,7 @@ import { maxMinerWorkers } from '../miner/controller.js';
 import type { Node } from '../node.js';
 import { formatAmount } from '../node.js';
 import { nextDifficulty } from '../chain/consensus.js';
-import { DIFFICULTY_WINDOW, blockReward } from '../chain/genesis.js';
+import { DIFFICULTY_WINDOW, MTP_WINDOW, blockReward } from '../chain/genesis.js';
 import { compactToTarget } from '../util/binary.js';
 import { bytesToHex } from '../util/binary.js';
 import { TICKER } from '../brand.js';
@@ -189,8 +189,8 @@ export function mountMiner(host: HTMLElement, node: Node): () => void {
     txsEl.textContent = `${s.currentTxCount} ${s.currentTxCount === 1 ? 'tx' : 'txs'} included`;
 
     const nextHeight = node.chain.height + 1;
-    const headers = node.chain.getRecentHeaders(DIFFICULTY_WINDOW);
-    const diff = nextDifficulty(nextHeight, headers);
+    const headers = node.chain.getRecentHeaders(DIFFICULTY_WINDOW + MTP_WINDOW - 1);
+    const diff = nextDifficulty(nextHeight, headers, Math.floor(Date.now() / 1000));
     const target = compactToTarget(diff);
     const bits = target <= 0n ? 256 : 256 - target.toString(2).length;
     const expected = target > 0n ? (1n << 256n) / (target + 1n) : 0n;

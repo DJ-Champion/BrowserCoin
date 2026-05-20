@@ -16,17 +16,42 @@ export const TARGET_BLOCK_TIME_S = 150;
 /**
  * Sliding-window size for per-block difficulty retargeting (see consensus.ts).
  * Every block compares average block-time over the last DIFFICULTY_WINDOW
- * blocks against TARGET_BLOCK_TIME_S and adjusts by up to ±MAX_RETARGET_FACTOR.
+ * blocks against TARGET_BLOCK_TIME_S and adjusts within the asymmetric caps.
  *
  * Bitcoin retargets every 2016 blocks because its global hashrate barely
  * moves. BrowserCoin's hashrate swings 100× when one tab joins or closes, so
- * we retarget every block over a short window. This is what most modern
- * altcoins (Monero, ZEC, etc.) do.
+ * we retarget every block over a short window. 50 blocks (~2 h at target)
+ * gives reasonable statistical convergence without being too laggy.
  */
-export const DIFFICULTY_WINDOW = 20;
+export const DIFFICULTY_WINDOW = 50;
 
-/** Bound the retarget change to ±4x per interval, like Bitcoin. */
-export const MAX_RETARGET_FACTOR = 4;
+/**
+ * Number of historical timestamps used to compute MTP. Retargeting uses MTP
+ * (not raw timestamps) on both ends of the window so that miner-supplied
+ * timestamps can't be ground in either direction to game difficulty.
+ */
+export const MTP_WINDOW = 11;
+
+/**
+ * Asymmetric retarget step caps, per block.
+ *
+ * Rising difficulty (target shrinks) is clamped tighter than falling
+ * difficulty (target grows). The asymmetry is the main defense against
+ * "hashrate gaming": an attacker who briefly applies hashrate can only push
+ * difficulty up by 2× per block, but when they leave the chain can drop
+ * difficulty by 4× per block — so honest miners aren't stuck for long at
+ * attacker-inflated difficulty.
+ */
+export const MAX_RETARGET_FACTOR_UP = 2;   // target / 2 (difficulty *2) per block
+export const MAX_RETARGET_FACTOR_DOWN = 4; // target * 4 (difficulty /4) per block
+
+/**
+ * Emergency drop: if the candidate block's timestamp is more than this many
+ * target intervals past the parent's timestamp, the chain is presumed stalled
+ * and the next block may use prev.difficulty / 2 without the normal window
+ * calculation. Prevents indefinite stalls when a large miner suddenly leaves.
+ */
+export const EMERGENCY_DROP_MULT = 6;
 
 /** Reject blocks whose timestamp is more than 2 hours in the future. */
 export const MAX_FUTURE_TIME_S = 2 * 60 * 60;
@@ -41,19 +66,19 @@ export const MAX_MEMPOOL_TXS = 5_000;
 export const MIN_FEE_PER_BYTE = 1n;
 
 /**
- * Initial difficulty target. Picked for memory-hard Argon2id (16 MB) PoW,
- * which runs at ~50-100 h/s/tab in browsers and ~100 h/s in Node tests.
+ * Initial difficulty target. Picked for memory-hard Argon2id (64 MB, 2 iter)
+ * PoW. Each hash is ~8× slower than the previous 16 MB/1-iter regime, so
+ * bootstrap blocks now land in ~500–700 ms instead of ~50 ms; per-block
+ * retarget then pulls difficulty up toward TARGET_BLOCK_TIME_S as real
+ * miners join.
  *
  * Compact 0x20400000 → target = 0x400000 << 232 = 2^254, giving
- * P(success) = 1/4 (~4 expected attempts). At ~10 ms/hash that lands the
- * first block in ~40 ms — a few real-world seconds is fine for browser
- * bootstrap, and per-block retarget pulls difficulty up toward
- * TARGET_BLOCK_TIME_S as miners join. SHA-256-era difficulties (e.g.
- * 0x1f00ffff with ~65k expected attempts) would take ~11 min per block.
+ * P(success) = 1/4 (~4 expected attempts).
  *
  * Must equal targetToCompact(compactToTarget(GENESIS_DIFFICULTY_COMPACT))
  * (canonical normalized form) so per-window retargets that hit the target
- * pace return identically.
+ * pace return identically. Mantissa's high bit must be clear (>=0x800000
+ * normalizes to a higher exponent).
  */
 export const GENESIS_DIFFICULTY_COMPACT = 0x20400000;
 

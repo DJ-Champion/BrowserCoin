@@ -20,7 +20,7 @@ The chain rules are deliberately Bitcoin-shaped (fixed max supply, halving rewar
 | Parameter | BrowserCoin | Bitcoin |
 |---|---|---|
 | Target block time | **2.5 min** (150 s) | 10 min |
-| Difficulty retarget | **every block** over a 20-block window | every 2 016 blocks |
+| Difficulty retarget | **every block** over a 50-block window, MTP-derived, asymmetric clamp (≤2× up, ≤4× down per block) + emergency drop | every 2 016 blocks |
 | Initial block reward | **50 BROWSER** | 50 BTC |
 | Halving interval | every **210 000 blocks** (~1 yr) | 210 000 blocks (~4 yr) |
 | Max supply | **21 000 000 BROWSER** | 21 000 000 BTC |
@@ -41,7 +41,7 @@ Per-block difficulty retargeting (over a sliding 20-block window) is what lets t
 
 - **Account model** (Ethereum-style: `{balance, nonce}` per address) — smaller state than UTXO, browser-friendly.
 - **Ed25519** signatures (`@noble/ed25519`) — fast, deterministic, audited.
-- **Argon2id PoW** (16 MB, memory-hard) mined in a Web Worker so the UI stays smooth and ASICs stay expensive.
+- **Argon2id PoW** (64 MB, 2 iterations, memory-hard) mined in a Web Worker so the UI stays smooth. RAM-bandwidth bottleneck — closest browser-friendly analogue to ASIC resistance.
 - **PeerJS / WebRTC** peer-to-peer with a self-hosted signaling server (`server/index.ts`).
 - **IndexedDB** for chain state, **localStorage** for the wallet keypair.
 - **Vanilla TypeScript + Vite** — no React, no framework runtime. Tiny bundle, hash-routed SPA shell.
