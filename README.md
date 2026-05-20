@@ -46,10 +46,6 @@ Per-block difficulty retargeting (over a sliding 20-block window) is what lets t
 - **IndexedDB** for chain state, **localStorage** for the wallet keypair.
 - **Vanilla TypeScript + Vite** — no React, no framework runtime. Tiny bundle, hash-routed SPA shell.
 
-> The on-chain identifiers (PoW salt, peer prefix, IndexedDB name, wallet file `type`) still use the
-> legacy `wwwcoin` form. They're part of the network protocol — changing them would fork the chain
-> and orphan every existing wallet. The rebrand to "BrowserCoin" is intentionally cosmetic.
-
 ## Quick start
 
 ```bash

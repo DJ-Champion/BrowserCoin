@@ -3,7 +3,7 @@
  * Used to persist the canonical chain so a reopened tab can resume without re-syncing.
  */
 
-const DB_NAME = 'wwwcoin';
+const DB_NAME = 'browsercoin';
 const DB_VERSION = 3;
 const BLOCKS_STORE = 'blocks';   // key: hash hex, value: { encoded: Uint8Array, height: number }
 const META_STORE = 'meta';       // key: string, value: arbitrary

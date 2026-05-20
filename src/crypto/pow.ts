@@ -9,13 +9,9 @@ import { argon2id } from 'hash-wasm';
  * the whole point.
  */
 
-const SALT = new Uint8Array([
-  // "wwwcoin-pow-v1" + two NUL bytes — 16 bytes total. Network-wide fixed salt
-  // is safe in PoW (no shared secret to crack). The version suffix gives us a
-  // clean hard-fork path: bump to "...v2" to invalidate the old chain.
-  0x77, 0x77, 0x77, 0x63, 0x6f, 0x69, 0x6e, 0x2d,
-  0x70, 0x6f, 0x77, 0x2d, 0x76, 0x31, 0x00, 0x00,
-]);
+// Network-wide fixed salt. The version suffix gives a clean hard-fork path:
+// bump to "...v2" to invalidate the old chain.
+const SALT = new TextEncoder().encode('browsercoin-pow-v1');
 
 export const POW_PARAMS = {
   memorySize: 16 * 1024, // KiB → 16 MB

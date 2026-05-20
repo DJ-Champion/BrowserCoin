@@ -18,7 +18,7 @@ const MAX_PEERS = 8;
 const MIN_PEERS = 3;
 const HEARTBEAT_MS = 30_000;
 const TX_REBROADCAST_MS = 15_000;
-const PEER_PREFIX = 'wwwcoin-';
+const PEER_PREFIX = 'browsercoin-';
 const MAX_ORPHANS = 2048;
 
 export interface PeerStatus {

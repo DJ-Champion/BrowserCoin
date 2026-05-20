@@ -35,14 +35,12 @@ export function saveWallet(kp: KeyPair): void {
   localStorage.setItem(WALLET_KEY, JSON.stringify(data));
 }
 
-// Both `type` strings are accepted on import for backwards compatibility with
-// wallet files exported by the old wwwCoin builds. We write the new tag.
-const WALLET_FILE_TYPES = new Set(['browsercoin-wallet', 'wwwcoin-wallet']);
+const WALLET_FILE_TYPE = 'browsercoin-wallet';
 
 /** Serialize the wallet for export as a downloadable JSON file. */
 export function exportWalletJson(kp: KeyPair): string {
   const out = {
-    type: 'browsercoin-wallet',
+    type: WALLET_FILE_TYPE,
     version: 1,
     address: kp.address,
     privateKeyHex: bytesToHex(kp.privateKey),
@@ -54,7 +52,7 @@ export function exportWalletJson(kp: KeyPair): string {
 /** Import from the file format produced by exportWalletJson. Throws on bad input. */
 export function importWalletJson(text: string): KeyPair {
   const parsed = JSON.parse(text) as { type?: string; privateKeyHex?: string };
-  if (!parsed.type || !WALLET_FILE_TYPES.has(parsed.type)) throw new Error('not a BrowserCoin wallet file');
+  if (parsed.type !== WALLET_FILE_TYPE) throw new Error('not a BrowserCoin wallet file');
   if (!parsed.privateKeyHex) throw new Error('missing privateKeyHex');
   const kp = fromPrivateKey(hexToBytes(parsed.privateKeyHex));
   saveWallet(kp);

@@ -1,5 +1,4 @@
 import { Node } from './node.js';
-import { migrateLocalStorage } from './storage/migrate.js';
 import { mountHome } from './ui/home.js';
 import { mountWallet } from './ui/wallet.js';
 import { mountMiner } from './ui/miner.js';
@@ -10,14 +9,9 @@ import { mountSettings } from './ui/settings.js';
 import { compactToTarget } from './util/binary.js';
 import { Router, wireNav } from './ui/router.js';
 
-migrateLocalStorage();
-
 const node = new Node();
 
-// Console handle. `browsercoin` is the canonical name now; keep `wwwcoin`
-// alias so any old console shortcuts users have memorized still work.
-(window as unknown as { browsercoin: Node; wwwcoin: Node }).browsercoin = node;
-(window as unknown as { browsercoin: Node; wwwcoin: Node }).wwwcoin = node;
+(window as unknown as { browsercoin: Node }).browsercoin = node;
 
 void node.start();
 
