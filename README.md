@@ -5,7 +5,7 @@
 - 🌐 **Live demo:** [browsercoin.org](https://browsercoin.org)
 - 💻 **Source:** [github.com/swompythesecond/BrowserCoin](https://github.com/swompythesecond/BrowserCoin)
 
-> **Status:** v0.2 — full end-to-end implementation with a fresh UI. Memory-hard Argon2id PoW; honest 51%-attack caveat applies (see [Security](#security)).
+> **Status:** v0.2 — full end-to-end implementation with a fresh UI. Memory-hard Argon2id PoW, MTP-derived asymmetric difficulty retargeting, no centralized checkpoints.
 
 ---
 
@@ -26,7 +26,7 @@ The chain rules are deliberately Bitcoin-shaped (fixed max supply, halving rewar
 | Max supply | **21 000 000 BROWSER** | 21 000 000 BTC |
 | Smallest unit | 10⁻⁸ BROWSER | 10⁻⁸ BTC |
 
-Per-block difficulty retargeting (over a sliding 20-block window) is what lets the chain self-calibrate to the very volatile aggregate hashrate of "however many browser tabs are open right now."
+Per-block retargeting over a 50-block sliding window is what lets the chain self-calibrate to the very volatile aggregate hashrate of "however many browser tabs are open right now." The retarget uses median-time-past on both ends of the window (kills single-timestamp lies), an asymmetric step cap (≤2× harder, ≤4× easier per block — so attackers can't pin difficulty high after they leave), and an emergency-drop rule that halves difficulty if a block goes >6× target without being found (so the chain can't stall when a large miner suddenly disappears).
 
 ## Features
 
@@ -91,27 +91,41 @@ public/           static assets (logo, styles.css)
 
 ## Security
 
-Handled in v1:
+Handled:
 
 - **Double-spend / replay** — account nonces + chain-id baked into the signed preimage
 - **Tx malleability** — Ed25519 deterministic signatures
 - **Spam** — per-byte min fee, mempool cap, signature verify before relay
 - **Timestamp warp** — median-time-past rule + 2 h future cap
 - **Block size attacks** — 256 KB cap
+- **Hashrate-gaming the difficulty algorithm** — MTP-derived intervals (single-timestamp lies move MTP by <1/11 of the lie), asymmetric step caps (attacker can't pin difficulty high after withdrawing hashrate), emergency drop (chain recovers from total hashrate collapse without stalling)
 
-Not handled in v1 (documented honestly):
+### On 51% — a deliberate design decision
 
-- **51% attack from outside-browser hashpower.** Argon2id-memory-hard PoW raises the bar
-  considerably vs SHA-256, but a determined adversary with enough memory bandwidth could still
-  out-mine the browser network. Mitigation path: federated "soft checkpoint" served by the
-  bootstrap server (planned for v2 — endpoint stubbed). The consensus module is intentionally
-  isolated.
+A 51% attack from outside-browser hashpower is theoretically possible. BrowserCoin will **not**
+defend against it with centralized soft checkpoints or any other federated signing scheme,
+because that would defeat the entire point of building a fully-decentralized, in-browser
+cryptocurrency. The defense BrowserCoin uses is the same one Bitcoin actually relies on in
+practice — making the attack **expensive enough to deter rational attackers** — adapted to a
+network with no ASIC moat and no fiat price.
+
+The defense in depth:
+
+1. **Memory-hard Argon2id (64 MB, 2 iterations).** RAM bandwidth dominates the per-hash cost, not raw compute. Server attackers can't cheaply scale memory bandwidth the way they can scale cores — cloud RAM is oversubscribed; bare-metal DDR5 channels cost real money. The gap between a $20k server's per-dollar hashrate and a laptop's is ~5–20× (vs ~10,000× for SHA-256 + ASIC).
+2. **Network scale is the actual moat.** With enough participating browsers, the aggregate hashrate exceeds what an attacker can affordably match in bare-metal RAM bandwidth. Each new participant linearly raises the attacker's required investment.
+3. **Hardened retargeting** (see above) makes hashrate-gaming impractical even before raw outpace becomes infeasible.
+
+The bootstrap window — when the network is small — is genuinely the vulnerable phase, and that's
+documented honestly. Don't put value on the chain until the network is large enough to defend
+itself. There is no fiat market, no exchange listing, no economic skin in the game to attract
+sophisticated attackers; this is an experiment in seeing how far truly decentralized
+browser-native consensus can go.
 
 ## Caveats
 
 - **This is an experiment, not a financial instrument.** Don't put real value on the chain.
 - BROWSER has no fiat market. The 21M-supply cap exists because the rules are Bitcoin-shaped, not because the token is scarce in any meaningful economic sense.
-- The bootstrap server is a single point of failure for *peer discovery*. The chain itself is decentralized; finding peers is not.
+- **Bootstrap server is pluggable.** The PeerJS signaling server is used only for *peer discovery* — the chain itself is fully decentralized. If the default server goes down or you don't trust it, change the URL under **Settings → Bootstrap server** and you're back online. Anyone can run `npm run server` and host their own.
 
 ## License
 
