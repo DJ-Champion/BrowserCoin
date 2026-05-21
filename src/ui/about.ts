@@ -34,12 +34,13 @@ export function mountAbout(host: HTMLElement): () => void {
       <p>
         I built BrowserCoin to go back to what crypto actually is, and to make
         it easy enough that anyone can be part of it. Open a webpage, you're
-        in. Find a block on your laptop, see it appear in the explorer with
-        your address on it. Send coins to a friend by showing them a QR code
-        on your phone. <strong>There is no market where you can buy BROWSER
-        with dollars.</strong> The only way to get coins is to mine them, or
-        to have someone who already mined some send them to you. Nobody is
-        selling you anything.
+        in — no login, no signup, no nothing, because real crypto doesn't
+        require any. It can be completely anonymous. Find a block on your
+        laptop, see it appear in the explorer with your address on it. Send
+        coins to a friend by showing them a QR code on your phone.
+        <strong>There is no market where you can buy BROWSER with dollars.</strong>
+        The only way to get coins is to mine them, or to have someone who
+        already mined some send them to you. Nobody is selling you anything.
       </p>
 
       <p>
@@ -56,6 +57,14 @@ export function mountAbout(host: HTMLElement): () => void {
         Nobody had bought any. There was no chart. They were there because the
         experiment was interesting. That moment is over for Bitcoin. It isn't
         over for new chains.
+      </p>
+
+      <p>
+        Participating in Bitcoin back then was hard. This isn't. Everyone who
+        opens the page takes part in the experiment and makes the network
+        stronger. It has never been easier to be part of a crypto network and
+        enjoy it for what it is — a fascinating technology. Not a
+        get-rich-quick scheme.
       </p>
 
       <h3>Fully decentralized</h3>
@@ -93,7 +102,12 @@ export function mountAbout(host: HTMLElement): () => void {
       <p>
         If those numbers look familiar — yes, the monetary policy is the same
         shape as Bitcoin's. Same supply, same halving schedule, four times the
-        throughput. That's intentional.
+        throughput. That's intentional. An homage to Bitcoin if you want, but
+        more importantly, it's a set of parameters that are widely understood
+        and that work well for a chain of this scale. And it's not a trillion
+        coins in circulation like some of the copycats. The supply is scarce
+        enough that it can be meaningful to own some, but not so scarce that
+        you have to worry about dust or microtransactions.
       </p>
 
       <h3>Design decisions</h3>
@@ -216,6 +230,7 @@ export function mountAbout(host: HTMLElement): () => void {
         <li>Click <strong>Mine</strong>. Your CPU starts grinding Argon2id hashes. When one lands below the current difficulty target, you've found a block and earned 50 BROWSER.</li>
         <li>Show someone the <strong>QR code</strong> next to your address. They can scan it to send you coins.</li>
         <li>Tell a friend.</li>
+        <li>And most importantly, have fun. Crypto is a neat technology — time to honor it by taking part.</li>
       </ol>
 
       <h3>The code</h3>
@@ -229,5 +244,5 @@ export function mountAbout(host: HTMLElement): () => void {
     </article>
   `;
   host.appendChild(view);
-  return () => {};
+  return () => { };
 }
