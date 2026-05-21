@@ -91,6 +91,15 @@ code { font-family: var(--mono); background: var(--surface-2); padding: 1px 5px;
   color: var(--muted);
   font-size: 0.8rem;
 }
+.brand-learn {
+  color: var(--accent);
+  margin-left: 8px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.brand-learn:hover {
+  text-decoration: underline;
+}
 
 .nav-tabs {
   display: flex;
@@ -573,6 +582,70 @@ label {
 }
 .kv dt { color: var(--muted); }
 .kv dd { margin: 0; font-family: var(--mono); word-break: break-all; }
+
+/* ============ About page ============ */
+
+.view-about {
+  max-width: 760px;
+}
+.about-body {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 28px 32px;
+  color: var(--text-2);
+  line-height: 1.65;
+}
+.about-body .lead {
+  color: var(--text);
+  font-size: 1.05rem;
+}
+.about-body h3 {
+  margin: 28px 0 10px;
+  font-size: 1.05rem;
+  color: var(--text);
+  letter-spacing: -0.2px;
+}
+.about-body p {
+  margin: 0 0 12px;
+}
+.about-body ul, .about-body ol {
+  margin: 0 0 14px;
+  padding-left: 22px;
+}
+.about-body li {
+  margin-bottom: 4px;
+}
+.about-body strong { color: var(--text); }
+.about-body a { color: var(--accent); }
+
+/* ============ Wallet QR ============ */
+
+.qr-wrap {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.qr-box {
+  width: 132px;
+  height: 132px;
+  padding: 8px;
+  background: #fff;
+  border-radius: var(--radius-md);
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+.qr-box svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.qr-caption {
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
 
 /* ============ Site footer ============ */
 

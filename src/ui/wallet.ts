@@ -5,6 +5,7 @@ import { TICKER } from '../brand.js';
 import { computeActivity, filterActivity, renderActivityRows, type ActivityFilter } from './activity.js';
 import { cardHeader } from './info.js';
 import { renderPager } from './pager.js';
+import QRCode from 'qrcode';
 
 const PAGE_SIZE = 25;
 
@@ -20,7 +21,12 @@ const FILTERS: Array<{ key: ActivityFilter; label: string }> = [
  * Full-page wallet: hero balance, send form, paginated activity with filter
  * chips.
  */
-export function mountWallet(host: HTMLElement, node: Node): () => void {
+/** Where the QR-share link points. Same origin as wherever the page is served. */
+function shareUrl(address: string): string {
+  return `${window.location.origin}/?to=${address}`;
+}
+
+export function mountWallet(host: HTMLElement, node: Node, params?: URLSearchParams): () => void {
   const view = document.createElement('div');
   view.className = 'view';
   view.innerHTML = `
@@ -37,6 +43,10 @@ export function mountWallet(host: HTMLElement, node: Node): () => void {
         <div class="row">
           <input data-w="address" readonly />
           <button class="ghost" data-w="copy">Copy</button>
+        </div>
+        <div class="qr-wrap mt-md">
+          <div class="qr-box" data-w="qr"></div>
+          <div class="qr-caption">Scan to send coins to this wallet.</div>
         </div>
         <div class="mt-md text-sm muted" data-w="nonce">nonce —</div>
       </section>
@@ -110,6 +120,7 @@ export function mountWallet(host: HTMLElement, node: Node): () => void {
   const addressEl = view.querySelector<HTMLInputElement>('[data-w="address"]')!;
   const copyBtn = view.querySelector<HTMLButtonElement>('[data-w="copy"]')!;
   const nonceEl = view.querySelector<HTMLElement>('[data-w="nonce"]')!;
+  const qrEl = view.querySelector<HTMLElement>('[data-w="qr"]')!;
 
   const toEl = view.querySelector<HTMLInputElement>('[data-w="to"]')!;
   const amountEl = view.querySelector<HTMLInputElement>('[data-w="amount"]')!;
@@ -167,10 +178,28 @@ export function mountWallet(host: HTMLElement, node: Node): () => void {
     }
   });
 
+  // Cache the last-rendered QR address so we don't redraw on every paint().
+  let qrFor: string | null = null;
+  function renderQr(address: string): void {
+    if (qrFor === address) return;
+    qrFor = address;
+    QRCode.toString(shareUrl(address), {
+      type: 'svg',
+      margin: 1,
+      errorCorrectionLevel: 'M',
+      color: { dark: '#0d0f17', light: '#ffffff' },
+    }).then((svg) => {
+      qrEl.innerHTML = svg;
+    }).catch(() => {
+      qrEl.innerHTML = '';
+    });
+  }
+
   function paintBalance(): void {
     balanceEl.innerHTML = `${formatAmount(node.myBalance())} <span class="unit">${TICKER}</span>`;
     addressEl.value = node.wallet.address;
     nonceEl.textContent = `nonce ${node.myNonce()}`;
+    renderQr(node.wallet.address);
   }
 
   function paint(): void {
@@ -208,6 +237,17 @@ export function mountWallet(host: HTMLElement, node: Node): () => void {
       : `${filtered.length} match`;
 
     renderPager(pagerEl, page, pages, (p) => { page = p; paint(); });
+  }
+
+  // Prefill the recipient if the page was opened via a `?to=...` share link.
+  // Strip the param from the URL so it doesn't re-prefill on subsequent navigation.
+  const prefillTo = params?.get('to');
+  if (prefillTo && /^[0-9a-fA-F]{64}$/.test(prefillTo)) {
+    toEl.value = prefillTo.toLowerCase();
+    history.replaceState(null, '', window.location.pathname + '#/wallet');
+    msgEl.className = 'text-sm muted';
+    msgEl.textContent = 'Recipient prefilled from share link.';
+    setTimeout(() => view.querySelector<HTMLElement>('[data-mount="send"]')?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 50);
   }
 
   paint();

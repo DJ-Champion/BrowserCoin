@@ -6,6 +6,7 @@ import { mountNetwork } from './ui/network.js';
 import { mountExplorer } from './ui/explorer.js';
 import { mountMempool } from './ui/mempool.js';
 import { mountSettings } from './ui/settings.js';
+import { mountAbout } from './ui/about.js';
 import { compactToTarget } from './util/binary.js';
 import { Router, wireNav } from './ui/router.js';
 
@@ -13,16 +14,28 @@ const node = new Node();
 
 (window as unknown as { browsercoin: Node }).browsercoin = node;
 
+// QR-code share links land here as `?to=<address>` on the bare URL. The app
+// is a hash-routed SPA, so rewrite to `#/wallet?to=...` and clear the query
+// string from the address bar before the router starts.
+{
+  const qs = new URLSearchParams(window.location.search);
+  const to = qs.get('to');
+  if (to) {
+    history.replaceState(null, '', window.location.pathname + `#/wallet?to=${encodeURIComponent(to)}`);
+  }
+}
+
 void node.start();
 
 const viewRoot = document.querySelector<HTMLElement>('[data-view-root]')!;
 const router: Router = new Router(viewRoot);
 router
   .route('/',         (host) => mountHome(host, node, router))
-  .route('/wallet',   (host) => mountWallet(host, node))
+  .route('/wallet',   (host, params) => mountWallet(host, node, params))
   .route('/mine',     (host) => mountMiner(host, node))
   .route('/explorer', (host) => mountExplorer(host, node))
   .route('/mempool',  (host) => mountMempool(host, node))
+  .route('/about',    (host) => mountAbout(host))
   .route('/settings', (host) => mountSettings(host, node))
   .setFallback('/');
 wireNav(router);
