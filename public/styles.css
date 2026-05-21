@@ -91,13 +91,13 @@ code { font-family: var(--mono); background: var(--surface-2); padding: 1px 5px;
   color: var(--muted);
   font-size: 0.8rem;
 }
-.brand-learn {
+.view-sub-link {
   color: var(--accent);
-  margin-left: 8px;
+  margin-left: 6px;
   font-weight: 500;
   white-space: nowrap;
 }
-.brand-learn:hover {
+.view-sub-link:hover {
   text-decoration: underline;
 }
 
