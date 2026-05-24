@@ -1,3 +1,8 @@
+// Bundled via Vite so the emitted asset gets a content hash. Without this,
+// `public/styles.css` was served at a stable URL, so a CDN/browser holding
+// an old copy could pair it with a fresh index.html — see the sync-overlay
+// logo blow-up after the May 2026 deploy.
+import './styles.css';
 import { Node, formatAmount } from './node.js';
 import { mountHome } from './ui/home.js';
 import { mountWallet } from './ui/wallet.js';
