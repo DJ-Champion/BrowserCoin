@@ -16,14 +16,14 @@ const node = new Node();
 
 (window as unknown as { browsercoin: Node }).browsercoin = node;
 
-// QR-code share links land here as `?to=<address>` on the bare URL. The app
-// is a hash-routed SPA, so rewrite to `#/wallet?to=...` and clear the query
-// string from the address bar before the router starts.
+// QR-code share links land here as `?to=<address>` on the bare URL. Forward
+// straight into the wallet route — replaceState (not pushState) so the entry
+// the user came in on doesn't clutter their back-button history.
 {
   const qs = new URLSearchParams(window.location.search);
   const to = qs.get('to');
-  if (to) {
-    history.replaceState(null, '', window.location.pathname + `#/wallet?to=${encodeURIComponent(to)}`);
+  if (to && window.location.pathname === '/') {
+    history.replaceState(null, '', `/wallet?to=${encodeURIComponent(to)}`);
   }
 }
 

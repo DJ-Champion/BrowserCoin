@@ -25,6 +25,7 @@
  */
 
 import express from 'express';
+import rateLimit from 'express-rate-limit';
 import http from 'node:http';
 import { promises as fs } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -44,6 +45,30 @@ const STALE_PEER_MS = 60_000;
  * doesn't make the count flicker.
  */
 const MINING_TTL_MS = 90_000;
+
+/**
+ * Per-IP rate limits. In-memory only — Redis would only be needed if this
+ * API ran as multiple instances sharing limiter state, which is not the
+ * current deployment shape (one process per port, one `chain-${PORT}.json`).
+ */
+const heavyLimiter = rateLimit({
+  windowMs: 60_000,
+  limit: 30,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+});
+const readHeavyLimiter = rateLimit({
+  windowMs: 60_000,
+  limit: 60,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+});
+const cheapLimiter = rateLimit({
+  windowMs: 60_000,
+  limit: 600,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+});
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CHAIN_FILE = path.join(__dirname, `chain-${PORT}.json`);
@@ -182,6 +207,11 @@ setInterval(() => {
 }, 10_000);
 
 const app = express();
+// Trust one proxy hop (Netlify/Cloudflare/Caddy/nginx) so `req.ip` reflects
+// the real client IP from `X-Forwarded-For`. Without this, per-IP limits
+// would bucket every request under the proxy's address. Update the hop
+// count if the deployment topology changes.
+app.set('trust proxy', 1);
 const server = http.createServer(app);
 
 app.use(express.json({ limit: '2mb' }));
@@ -192,7 +222,7 @@ app.use((_req, res, next) => {
   next();
 });
 
-app.get('/stats', (_req, res) => {
+app.get('/stats', cheapLimiter, (_req, res) => {
   const now = Date.now();
   const heights = [...peers.values()].map((p) => p.reportedHeight).sort((a, b) => b - a);
   res.json({
@@ -206,12 +236,12 @@ app.get('/stats', (_req, res) => {
   });
 });
 
-app.get('/peers', (_req, res) => {
+app.get('/peers', cheapLimiter, (_req, res) => {
   const ids = [...peers.keys()].slice(0, 64);
   res.json({ peers: ids });
 });
 
-app.post('/heartbeat', (req, res) => {
+app.post('/heartbeat', cheapLimiter, (req, res) => {
   const { id, height, mining } = req.body as { id?: string; height?: number; mining?: boolean };
   if (typeof id !== 'string' || typeof height !== 'number') {
     res.status(400).json({ error: 'bad heartbeat' });
@@ -234,11 +264,11 @@ app.post('/heartbeat', (req, res) => {
   res.json({ ok: true });
 });
 
-app.get('/tip', (_req, res) => {
+app.get('/tip', cheapLimiter, (_req, res) => {
   res.json({ height: chain.height, tipHash: bytesToHex(chain.tip.hash) });
 });
 
-app.get('/blocks', (req, res) => {
+app.get('/blocks', readHeavyLimiter, (req, res) => {
   const fromHeight = Math.max(0, Number(req.query.fromHeight ?? 0));
   const max = Math.max(1, Math.min(200, Number(req.query.max ?? 100)));
   // Walk canonical newest-first, unshift to get oldest-first.
@@ -251,12 +281,12 @@ app.get('/blocks', (req, res) => {
   res.json({ blocks: blocks.slice(0, max) });
 });
 
-app.get('/mempool', (_req, res) => {
+app.get('/mempool', cheapLimiter, (_req, res) => {
   const txs = mempool.list().map((tx) => bytesToHex(encodeTx(tx)));
   res.json({ txs });
 });
 
-app.post('/txs', (req, res) => {
+app.post('/txs', heavyLimiter, (req, res) => {
   const body = req.body as { txs?: string[] };
   if (!Array.isArray(body?.txs)) {
     res.status(400).json({ status: 'invalid', error: 'missing txs array' });
@@ -279,7 +309,7 @@ app.post('/txs', (req, res) => {
   res.json({ admitted, errors });
 });
 
-app.post('/block', async (req, res) => {
+app.post('/block', heavyLimiter, async (req, res) => {
   const body = req.body as { block?: string };
   if (!body?.block) {
     res.status(400).json({ status: 'invalid', error: 'missing block field' });
@@ -297,7 +327,7 @@ app.post('/block', async (req, res) => {
   }
 });
 
-app.get('/', (_req, res) => {
+app.get('/', cheapLimiter, (_req, res) => {
   res.type('text/plain').send(
     [
       'BrowserCoin API helper server',

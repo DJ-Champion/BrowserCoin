@@ -222,7 +222,7 @@ export function mountWallet(host: HTMLElement, node: Node, params?: URLSearchPar
   const prefillTo = params?.get('to');
   if (prefillTo && /^[0-9a-fA-F]{64}$/.test(prefillTo)) {
     toEl.value = prefillTo.toLowerCase();
-    history.replaceState(null, '', window.location.pathname + '#/wallet');
+    history.replaceState(null, '', '/wallet');
     msgEl.className = 'text-sm muted';
     msgEl.textContent = 'Recipient prefilled from share link.';
     setTimeout(() => view.querySelector<HTMLElement>('[data-mount="send"]')?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 50);

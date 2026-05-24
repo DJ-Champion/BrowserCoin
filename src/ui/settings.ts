@@ -4,6 +4,8 @@ import type { Node } from '../node.js';
 import { cardHeader } from './info.js';
 import { defaultServerLists, parseServerInput } from '../net/servers.js';
 import { clearAll } from '../storage/idb.js';
+import { encodeBlock } from '../chain/block.js';
+import { bytesToHex } from '../util/binary.js';
 
 export function mountSettings(host: HTMLElement, node: Node): () => void {
   const view = document.createElement('div');
@@ -27,6 +29,21 @@ export function mountSettings(host: HTMLElement, node: Node): () => void {
           <button class="ghost" data-w="import">Import key…</button>
           <button class="ghost danger" data-w="newkey">Generate new wallet</button>
         </div>
+      </section>
+
+      <section class="card" data-mount="chain-backup">
+        <div data-slot="header"></div>
+        <p class="text-sm muted" style="margin:0 0 12px;">
+          Save the canonical chain this tab currently sees to a file. Useful if
+          you want to run your own helper server, archive the chain offline, or
+          rebuild infrastructure on top of it — the file matches the format the
+          BrowserCoin API server reads on startup.
+        </p>
+        <div class="row">
+          <button data-w="export-chain">Export chain…</button>
+          <span class="text-sm muted" data-w="chain-stats"></span>
+        </div>
+        <div class="text-sm mt-sm" data-w="chain-msg"></div>
       </section>
 
       <section class="card col-2" data-mount="servers">
@@ -105,6 +122,13 @@ https://server2.example"></textarea>
     info: {
       title: 'About your wallet',
       body: `Your wallet is just an Ed25519 keypair stored in this browser. Anyone holding the private key controls the coins — so treat the exported JSON like a password.\n\nGenerating a new wallet does not delete the old one from the chain — its balance still exists, you just lose access without a backup.`,
+    },
+  }));
+  view.querySelector<HTMLElement>('[data-mount="chain-backup"] [data-slot="header"]')!.replaceWith(cardHeader({
+    title: 'Chain backup',
+    info: {
+      title: 'Exporting the chain',
+      body: `Every browser tab keeps its own validated copy of the chain, and helper API servers keep canonical backups on disk. Exporting from here grabs the canonical chain this tab currently sees as heaviest.\n\nThe file uses the same JSON layout the helper API server reads on startup ({ version: 1, blocks: [hex…] }, oldest-first, excluding genesis). To bootstrap your own helper, drop the file in place of the server's chain-9000.json and start the server — it will replay your blocks and serve them like any other node.\n\nNo trust is transferred. Anyone importing the file re-verifies every block against consensus rules, so a tampered export is just rejected.`,
     },
   }));
   view.querySelector<HTMLElement>('[data-mount="servers"] [data-slot="header"]')!.replaceWith(cardHeader({
@@ -251,6 +275,41 @@ https://server2.example"></textarea>
     flash(msg, 'New wallet generated.', 'green');
   });
 
+  // --- Chain export -----------------------------------------------------
+  const exportChainBtn = view.querySelector<HTMLButtonElement>('[data-w="export-chain"]')!;
+  const chainStats = view.querySelector<HTMLElement>('[data-w="chain-stats"]')!;
+  const chainMsg = view.querySelector<HTMLElement>('[data-w="chain-msg"]')!;
+  const renderChainStats = (): void => {
+    chainStats.textContent = `(tip height ${node.chain.height})`;
+  };
+  renderChainStats();
+  const unsubChain = node.onChain(renderChainStats);
+
+  exportChainBtn.addEventListener('click', () => {
+    exportChainBtn.disabled = true;
+    flash(chainMsg, 'Encoding blocks…', 'muted');
+    try {
+      // Match server/api.ts:saveChainToDiskNow exactly — oldest-first, genesis
+      // omitted (the server's Blockchain constructor seeds genesis itself).
+      const blocks: string[] = [];
+      for (const cb of node.chain.iterateCanonical()) {
+        if (cb.block.header.height > 0) blocks.unshift(bytesToHex(encodeBlock(cb.block)));
+      }
+      const payload = JSON.stringify({ version: 1, blocks });
+      const blob = new Blob([payload], { type: 'application/json' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `browsercoin-chain-h${node.chain.height}.json`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+      flash(chainMsg, `Exported ${blocks.length} blocks (tip h=${node.chain.height}).`, 'green');
+    } catch (e) {
+      flash(chainMsg, `Failed: ${(e as Error).message}`, 'red');
+    } finally {
+      exportChainBtn.disabled = false;
+    }
+  });
+
   const clearCacheBtn = view.querySelector<HTMLButtonElement>('[data-w="clear-cache"]')!;
   const clearMsg = view.querySelector<HTMLElement>('[data-w="clear-msg"]')!;
   clearCacheBtn.addEventListener('click', async () => {
@@ -268,7 +327,7 @@ https://server2.example"></textarea>
     }
   });
 
-  return () => { unsubNet(); };
+  return () => { unsubNet(); unsubChain(); };
 }
 
 function flash(el: HTMLElement, text: string, cls: 'green' | 'red' | 'muted'): void {

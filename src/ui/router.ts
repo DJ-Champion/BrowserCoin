@@ -6,10 +6,14 @@ interface Route {
 }
 
 /**
- * Minimal hash router. Routes are matched against the part of the hash before
- * the optional `?` query, so `#/wallet?page=2` resolves to `/wallet` with
- * `page=2`. The previously mounted view's optional cleanup function is invoked
- * before mounting the next one.
+ * Minimal History-API SPA router. Routes are matched against `location.pathname`
+ * with `location.search` parsed into params, so `/wallet?page=2` resolves to
+ * `/wallet` with `page=2`. The previously mounted view's optional cleanup
+ * function is invoked before mounting the next one.
+ *
+ * Static hosting note: refreshing on any non-root path requires the host to
+ * serve `index.html` for unknown URLs (SPA fallback). See `public/_redirects`
+ * for the Cloudflare Pages config; other hosts need the equivalent.
  */
 export class Router {
   private routes: Route[] = [];
@@ -18,7 +22,7 @@ export class Router {
   private currentPath = '';
 
   constructor(private host: HTMLElement) {
-    window.addEventListener('hashchange', () => this.resolve());
+    window.addEventListener('popstate', () => this.resolve());
   }
 
   route(path: string, mount: RouteHandler): this {
@@ -36,11 +40,17 @@ export class Router {
   }
 
   navigate(path: string): void {
-    if (location.hash === `#${path}`) {
+    // path may include a `?query` — split before comparing against the current
+    // pathname so we don't double-stack identical entries in the back-button
+    // history.
+    const [pathPart, queryPart] = path.split('?');
+    const search = queryPart ? `?${queryPart}` : '';
+    if (location.pathname === pathPart && location.search === search) {
       this.resolve();
       return;
     }
-    location.hash = `#${path}`;
+    history.pushState(null, '', path);
+    this.resolve();
   }
 
   currentRoute(): string {
@@ -48,12 +58,10 @@ export class Router {
   }
 
   private resolve(): void {
-    const raw = location.hash.startsWith('#') ? location.hash.slice(1) : location.hash;
-    const [pathPart, queryPart = ''] = raw.split('?');
-    const path = pathPart && pathPart.length > 0 ? pathPart : this.fallback;
-    const params = new URLSearchParams(queryPart);
+    const pathname = location.pathname || this.fallback;
+    const params = new URLSearchParams(location.search);
 
-    const match = this.routes.find((r) => r.path === path) ?? this.routes.find((r) => r.path === this.fallback);
+    const match = this.routes.find((r) => r.path === pathname) ?? this.routes.find((r) => r.path === this.fallback);
     if (!match) return;
 
     this.currentCleanup?.();
@@ -71,11 +79,30 @@ export class Router {
   }
 }
 
+/**
+ * Wire nav-tab buttons AND intercept clicks on any internal `<a href="/...">`
+ * so anchor clicks become SPA navigations instead of full page loads. We only
+ * intercept plain left-clicks with no modifier keys — middle-click, cmd-click,
+ * etc. still open in a new tab as the user expects.
+ */
 export function wireNav(router: Router, root: HTMLElement = document.body): void {
   root.querySelectorAll<HTMLElement>('[data-nav] .nav-tab').forEach((tab) => {
     tab.addEventListener('click', () => {
       const target = tab.dataset['route'];
       if (target) router.navigate(target);
     });
+  });
+
+  document.addEventListener('click', (e) => {
+    if (e.defaultPrevented) return;
+    if (e.button !== 0) return;
+    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    const anchor = (e.target as Element | null)?.closest('a');
+    if (!anchor) return;
+    const href = anchor.getAttribute('href');
+    if (!href || !href.startsWith('/')) return;
+    if (anchor.target && anchor.target !== '' && anchor.target !== '_self') return;
+    e.preventDefault();
+    router.navigate(href);
   });
 }
