@@ -7,6 +7,7 @@ import { Node, formatAmount } from './node.js';
 import { mountHome } from './ui/home.js';
 import { mountWallet } from './ui/wallet.js';
 import { mountMiner, openOfflineModal, isOfflineModalOpen } from './ui/miner.js';
+import { maxMinerWorkers } from './miner/controller.js';
 import { mountNetwork } from './ui/network.js';
 import { mountExplorer } from './ui/explorer.js';
 import { mountMempool } from './ui/mempool.js';
@@ -33,6 +34,47 @@ const node = new Node();
 }
 
 void node.start();
+
+// Apply persisted miner settings up-front so auto-resume fires with the
+// user's last CPU/threads even if the active route isn't /mine or /home
+// (those views also apply them on mount — this is the no-view-mounted path).
+{
+  const max = maxMinerWorkers();
+  const rawThreads = Number(localStorage.getItem('browsercoin:miner-threads')) || 1;
+  const threads = Math.max(1, Math.min(max, Math.floor(rawThreads)));
+  const rawPctStr = localStorage.getItem('browsercoin:miner-throttle');
+  const rawPct = rawPctStr === null ? 100 : Number(rawPctStr);
+  const pct = Number.isFinite(rawPct) ? Math.max(0, Math.min(100, rawPct)) : 100;
+  node.miner.setWorkerCount(threads);
+  node.miner.setThrottle(pct / 100);
+}
+
+// Persist whether mining is on. Saved state is consulted on next page load
+// to auto-resume; clicking Stop clears it so a deliberately-stopped tab
+// stays stopped across refreshes. We only touch the flag on actual
+// transitions — that way a start() refused by the start-gate doesn't
+// emit running=false and wipe the resume intent before we can retry.
+const MINING_KEY = 'browsercoin:miner-running';
+let prevRunning = false;
+node.miner.onStatus((s) => {
+  if (s.running && !prevRunning) localStorage.setItem(MINING_KEY, '1');
+  else if (!s.running && prevRunning) localStorage.removeItem(MINING_KEY);
+  prevRunning = s.running;
+});
+
+// Auto-resume after refresh if the user was mining. The start-gate refuses
+// while we're still syncing — so retry once sync completes (canDismiss or
+// not, syncing flipping false is the signal we need).
+if (localStorage.getItem(MINING_KEY) === '1') {
+  const tryResume = (): boolean => {
+    if (node.getSyncStatus().syncing) return false;
+    node.miner.start();
+    return true;
+  };
+  if (!tryResume()) {
+    const unsub = node.onSync(() => { if (tryResume()) unsub(); });
+  }
+}
 
 const viewRoot = document.querySelector<HTMLElement>('[data-view-root]')!;
 const router: Router = new Router(viewRoot);

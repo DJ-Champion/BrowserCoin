@@ -15,10 +15,17 @@ import { isMiningOffline, openOfflineModal } from './miner.js';
 const PREVIEW_ROWS = 5;
 // Shared with the dedicated Mine view so the two stay in sync across reloads.
 const THREADS_KEY = 'browsercoin:miner-threads';
+const THROTTLE_KEY = 'browsercoin:miner-throttle';
 
 function clampThreads(n: number, max: number): number {
   if (!Number.isFinite(n)) return 1;
   return Math.max(1, Math.min(max, Math.floor(n)));
+}
+function clampPct(raw: string | null): number {
+  if (raw === null) return 100;
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return 100;
+  return Math.max(0, Math.min(100, Math.round(n)));
 }
 
 /**
@@ -228,14 +235,17 @@ export function mountHome(host: HTMLElement, node: Node, router: Router): () => 
   threadSlider.max = String(maxThreads);
   if (maxThreads === 1) threadSlider.disabled = true;
 
-  // Apply persisted thread count on first paint so the home card and /mine view
+  // Apply persisted settings on first paint so the home card and /mine view
   // agree even before the user visits /mine.
   const savedThreads = clampThreads(Number(localStorage.getItem(THREADS_KEY)) || 1, maxThreads);
+  const savedThrottlePct = clampPct(localStorage.getItem(THROTTLE_KEY));
   node.miner.setWorkerCount(savedThreads);
+  node.miner.setThrottle(savedThrottlePct / 100);
 
   cpuSlider.addEventListener('input', () => {
     const pct = Number(cpuSlider.value);
     cpuPctEl.textContent = `${pct}%`;
+    localStorage.setItem(THROTTLE_KEY, String(pct));
     node.miner.setThrottle(pct / 100);
   });
   threadSlider.addEventListener('input', () => {

@@ -9,6 +9,7 @@ import { TICKER } from '../brand.js';
 import { cardHeader } from './info.js';
 
 const THREADS_KEY = 'browsercoin:miner-threads';
+const THROTTLE_KEY = 'browsercoin:miner-throttle';
 
 /**
  * Full miner view: big animated hashrate hero, live stat tiles, controls, and
@@ -17,6 +18,7 @@ const THREADS_KEY = 'browsercoin:miner-threads';
 export function mountMiner(host: HTMLElement, node: Node): () => void {
   const maxThreads = maxMinerWorkers();
   const savedThreads = clampThreads(Number(localStorage.getItem(THREADS_KEY)) || 1, maxThreads);
+  const savedThrottlePct = clampPct(localStorage.getItem(THROTTLE_KEY));
 
   const view = document.createElement('div');
   view.className = 'view';
@@ -76,8 +78,8 @@ export function mountMiner(host: HTMLElement, node: Node): () => void {
     <div class="grid grid-2 mt-lg">
       <section class="card" data-mount="cpu">
         <div data-slot="header"></div>
-        <label>CPU power: <span data-w="pct">100%</span></label>
-        <input type="range" min="0" max="100" value="100" class="slider" data-w="slider" />
+        <label>CPU power: <span data-w="pct">${savedThrottlePct}%</span></label>
+        <input type="range" min="0" max="100" value="${savedThrottlePct}" class="slider" data-w="slider" />
         <label class="mt-md">Threads: <span data-w="threads">${savedThreads}</span> <span class="muted">/ ${maxThreads} available</span></label>
         <input type="range" min="1" max="${maxThreads}" value="${savedThreads}" step="1" class="slider" data-w="threadSlider" ${maxThreads === 1 ? 'disabled' : ''} />
       </section>
@@ -136,6 +138,7 @@ export function mountMiner(host: HTMLElement, node: Node): () => void {
   const threadsEl = view.querySelector<HTMLElement>('[data-w="threads"]')!;
 
   node.miner.setWorkerCount(savedThreads);
+  node.miner.setThrottle(savedThrottlePct / 100);
 
   toggleBtn.addEventListener('click', () => {
     const s = node.miner.getStatus();
@@ -154,6 +157,7 @@ export function mountMiner(host: HTMLElement, node: Node): () => void {
   slider.addEventListener('input', () => {
     const pct = Number(slider.value);
     pctEl.textContent = `${pct}%`;
+    localStorage.setItem(THROTTLE_KEY, String(pct));
     node.miner.setThrottle(pct / 100);
   });
   threadSlider.addEventListener('input', () => {
@@ -467,6 +471,12 @@ function formatDuration(sec: number): string {
 function clampThreads(n: number, max: number): number {
   if (!Number.isFinite(n)) return 1;
   return Math.max(1, Math.min(max, Math.floor(n)));
+}
+function clampPct(raw: string | null): number {
+  if (raw === null) return 100;
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return 100;
+  return Math.max(0, Math.min(100, Math.round(n)));
 }
 function formatHashNumber(h: number): string {
   if (h < 1000) return h.toFixed(0);
