@@ -14,7 +14,7 @@ async function main(): Promise<void> {
   const elapsed = performance.now() - start;
   const perHash = elapsed / N;
   const hps = 1000 / perHash;
-  console.log(`Argon2id (64 MB, 2 iter, 1 lane): ${perHash.toFixed(1)} ms/hash, ${hps.toFixed(1)} h/s`);
+  console.log(`Argon2id (32 MB, 1 iter, 1 lane): ${perHash.toFixed(1)} ms/hash, ${hps.toFixed(1)} h/s`);
   console.log(`At target = 2^255 (~2 expected hashes): ${(2 * perHash).toFixed(0)} ms per block`);
   console.log(`At target = 2^254 (~4 expected hashes): ${(4 * perHash).toFixed(0)} ms per block`);
   console.log(`At target = 2^250 (~64 expected hashes): ${(64 * perHash / 1000).toFixed(1)} s per block`);

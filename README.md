@@ -41,7 +41,7 @@ Per-block retargeting over a 50-block sliding window is what lets the chain self
 
 - **Account model** (Ethereum-style: `{balance, nonce}` per address) — smaller state than UTXO, browser-friendly.
 - **Ed25519** signatures (`@noble/ed25519`) — fast, deterministic, audited.
-- **Argon2id PoW** (64 MB, 2 iterations, memory-hard) mined in a Web Worker so the UI stays smooth. RAM-bandwidth bottleneck — closest browser-friendly analogue to ASIC resistance.
+- **Argon2id PoW** (32 MB, 1 iteration, memory-hard) mined in a Web Worker so the UI stays smooth. RAM-bandwidth bottleneck — closest browser-friendly analogue to ASIC resistance.
 - **PeerJS / WebRTC** peer-to-peer. Helper services are split: `server/api.ts` (chain backup + peer discovery) and `server/peerjs.ts` (signaling) run as independent processes so they can fail independently. Both lists are configurable in-app; anyone can run their own and add it.
 - **IndexedDB** for chain state, **localStorage** for the wallet keypair.
 - **Vanilla TypeScript + Vite** — no React, no framework runtime. Tiny bundle, hash-routed SPA shell.
@@ -120,7 +120,7 @@ network with no ASIC moat and no fiat price.
 
 The defense in depth:
 
-1. **Memory-hard Argon2id (64 MB, 2 iterations).** RAM bandwidth dominates the per-hash cost, not raw compute. Server attackers can't cheaply scale memory bandwidth the way they can scale cores — cloud RAM is oversubscribed; bare-metal DDR5 channels cost real money. The gap between a $20k server's per-dollar hashrate and a laptop's is ~5–20× (vs ~10,000× for SHA-256 + ASIC).
+1. **Memory-hard Argon2id (32 MB, 1 iteration).** RAM bandwidth dominates the per-hash cost, not raw compute. Server attackers can't cheaply scale memory bandwidth the way they can scale cores — cloud RAM is oversubscribed; bare-metal DDR5 channels cost real money. The gap between a $20k server's per-dollar hashrate and a laptop's is ~5–20× (vs ~10,000× for SHA-256 + ASIC).
 2. **Network scale is the actual moat.** With enough participating browsers, the aggregate hashrate exceeds what an attacker can affordably match in bare-metal RAM bandwidth. Each new participant linearly raises the attacker's required investment.
 3. **Hardened retargeting** (see above) makes hashrate-gaming impractical even before raw outpace becomes infeasible.
 

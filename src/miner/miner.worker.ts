@@ -22,8 +22,9 @@ import { powHash } from '../crypto/pow.js';
 import { hashMeetsTarget } from '../util/binary.js';
 
 const NONCE_OFFSET = 112;
-// Argon2id at 16 MB takes ~10-30 ms per hash, so each iteration is its own
-// natural batch — no need to amortize loop overhead like we did with SHA-256.
+// Argon2id at 32 MB / 1 iter takes ~40-125 ms per hash, so each iteration is
+// its own natural batch — no need to amortize loop overhead like we did with
+// SHA-256.
 const BATCH = 1;
 
 type StartMsg = {

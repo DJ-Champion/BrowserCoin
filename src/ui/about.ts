@@ -97,7 +97,7 @@ export function mountAbout(host: HTMLElement): () => void {
         <li>Total supply: <strong>21,000,000 BRC</strong>, ever.</li>
         <li>Block reward: <strong>50 BRC</strong>, halving every 210,000 blocks (~1 year at target pace).</li>
         <li>Target block time: <strong>2.5 minutes</strong>.</li>
-        <li>Proof-of-work: <strong>memory-hard Argon2id (64 MB, 2 iterations)</strong>. Mineable on a laptop or phone. Hostile to GPUs and server farms.</li>
+        <li>Proof-of-work: <strong>memory-hard Argon2id (32 MB, 1 iteration)</strong>. Mineable on a laptop or phone. Hostile to GPUs and server farms.</li>
         <li>Account-model ledger, Ed25519 signatures, 256 KB block cap, per-byte minimum fee.</li>
       </ul>
 
@@ -121,8 +121,8 @@ export function mountAbout(host: HTMLElement): () => void {
 
       <h4>Why mining uses your CPU, not a GPU or ASIC</h4>
       <p>
-        The hash function is <strong>Argon2id</strong>, configured with 64 MB
-        of memory and 2 iterations per attempt. Argon2id is <em>memory-hard</em>:
+        The hash function is <strong>Argon2id</strong>, configured with 32 MB
+        of memory and 1 iteration per attempt. Argon2id is <em>memory-hard</em>:
         every hash needs a large chunk of RAM, and the bottleneck is memory
         bandwidth, not raw compute. GPUs and custom hardware can't accelerate
         it the way they can accelerate SHA-256  they have plenty of compute

@@ -196,7 +196,7 @@ A header is valid when `bigEndianUint256(powHash(header_bytes)) < compactToTarge
 
 Per-verify cost on a typical laptop CPU: roughly 40–125 ms. JS reference implementation uses `hash-wasm`; any conformant Argon2id implementation works.
 
-> Note: the README's "64 MB, 2 iter" line is stale relative to the current code in `src/crypto/pow.ts`. **Verifiers must match the constants in `POW_PARAMS` above**, not the README prose.
+> Verifiers must match the constants in `POW_PARAMS` above exactly. The same params are restated in the README and About page for humans; the authoritative source is always `src/crypto/pow.ts`.
 
 ## 6. Signing rules
 

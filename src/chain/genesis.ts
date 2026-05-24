@@ -74,11 +74,11 @@ export const MAX_MEMPOOL_TXS = 5_000;
 export const MIN_FEE_PER_BYTE = 1n;
 
 /**
- * Initial difficulty target. Picked for memory-hard Argon2id (64 MB, 2 iter)
- * PoW. Each hash is ~8× slower than the previous 16 MB/1-iter regime, so
- * bootstrap blocks now land in ~500–700 ms instead of ~50 ms; per-block
- * retarget then pulls difficulty up toward TARGET_BLOCK_TIME_S as real
- * miners join.
+ * Initial difficulty target. Sized for memory-hard Argon2id PoW (see
+ * POW_PARAMS in src/crypto/pow.ts — currently 32 MB / 1 iter, ~40–125 ms
+ * per hash on a laptop). Bootstrap blocks land in a few hundred ms;
+ * per-block retarget then pulls difficulty up toward TARGET_BLOCK_TIME_S
+ * as real miners join.
  *
  * Compact 0x20400000 → target = 0x400000 << 232 = 2^254, giving
  * P(success) = 1/4 (~4 expected attempts).
