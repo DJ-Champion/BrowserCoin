@@ -22,6 +22,12 @@ const TX_REBROADCAST_MS = 15_000;
 const PEER_PREFIX = 'browsercoin-';
 const MAX_ORPHANS = 2048;
 const DIAL_TIMEOUT_MS = 8_000;
+// If we haven't received anything from a peer in this long, treat the
+// connection as dead and GC it. WebRTC's own `close` event is unreliable
+// when a remote tab vanishes — without an upper bound here the UI peer
+// count never decreases until a manual reload. Set to ~2.5 heartbeats so a
+// peer that misses two consecutive ping rounds is reaped.
+const PEER_STALE_MS = 75_000;
 
 /**
  * Public STUN servers used to discover our reflexive (NAT-mapped) address.
@@ -87,6 +93,8 @@ export class PeerNetwork {
   private myId: string | null = null;
 
   private connections = new Map<string, DataConnection>();
+  /** Wall-clock ms of the last message received from each connected peer. */
+  private lastSeen = new Map<string, number>();
   private status: PeerStatus;
   private statusListeners = new Set<(s: PeerStatus) => void>();
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
@@ -224,6 +232,7 @@ export class PeerNetwork {
 
     this.heartbeatTimer = setInterval(() => {
       void this.heartbeat();
+      this.pingAndReapStalePeers();
       if (this.connections.size < MIN_PEERS) {
         void this.dialFromBootstrap();
       }
@@ -292,6 +301,7 @@ export class PeerNetwork {
     this.txRebroadcastTimer = null;
     for (const c of this.connections.values()) c.close();
     this.connections.clear();
+    this.lastSeen.clear();
     for (const peer of this.peers.values()) {
       try { peer.destroy(); } catch { /* ignore */ }
     }
@@ -414,6 +424,7 @@ export class PeerNetwork {
         return;
       }
       this.connections.set(conn.peer, conn);
+      this.lastSeen.set(conn.peer, Date.now());
       this.candidatePool.add(conn.peer);
       this.status.connected = this.connections.size;
       this.emit();
@@ -444,6 +455,7 @@ export class PeerNetwork {
       // (might already have been replaced by a dedup race).
       if (this.connections.get(conn.peer) === conn) {
         this.connections.delete(conn.peer);
+        this.lastSeen.delete(conn.peer);
         this.status.connected = this.connections.size;
         this.emit();
       }
@@ -454,6 +466,11 @@ export class PeerNetwork {
   }
 
   private onIncoming(conn: DataConnection, msg: ProtoMsg): void {
+    // Any traffic at all proves the peer is still alive — refresh freshness
+    // before dispatch so even a bare pong counts.
+    if (this.connections.get(conn.peer) === conn) {
+      this.lastSeen.set(conn.peer, Date.now());
+    }
     try {
       switch (msg.t) {
         case 'hello':
@@ -583,6 +600,14 @@ export class PeerNetwork {
           break;
         }
 
+        case 'ping':
+          try { conn.send({ t: 'pong' } satisfies ProtoMsg); } catch { /* ignore */ }
+          break;
+
+        case 'pong':
+          // lastSeen already refreshed at the top of the switch.
+          break;
+
         case 'getHeaders':
         case 'headers':
         case 'invBlock':
@@ -662,6 +687,34 @@ export class PeerNetwork {
       }
       this.mempool.removeMany(waiting.transactions);
       cursor = bytesToHex(hashHeader(waiting.header));
+    }
+  }
+
+  /**
+   * Walk every direct connection: drop ones we haven't heard from in
+   * PEER_STALE_MS, and send a ping to the rest so a peer with no other traffic
+   * still produces a pong that refreshes their freshness. Critical because
+   * WebRTC's own close detection is delayed (and sometimes absent) when a
+   * remote tab is closed or its network drops — without this the UI peer
+   * count never decreases.
+   */
+  private pingAndReapStalePeers(): void {
+    const now = Date.now();
+    let reaped = false;
+    for (const [id, conn] of this.connections) {
+      const seen = this.lastSeen.get(id) ?? now;
+      if (now - seen > PEER_STALE_MS) {
+        try { conn.close(); } catch { /* ignore */ }
+        this.connections.delete(id);
+        this.lastSeen.delete(id);
+        reaped = true;
+        continue;
+      }
+      try { conn.send({ t: 'ping' } satisfies ProtoMsg); } catch { /* ignore */ }
+    }
+    if (reaped) {
+      this.status.connected = this.connections.size;
+      this.emit();
     }
   }
 

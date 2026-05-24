@@ -28,7 +28,15 @@ export type ProtoMsg =
   | { t: 'getAddrs'; max: number }
   | { t: 'addrs'; peers: string[] }
   | { t: 'invBlock'; hash: string; height: number }
-  | { t: 'invTx'; hash: string };
+  | { t: 'invTx'; hash: string }
+  // Liveness probe. WebRTC's `close` event doesn't fire when a remote tab
+  // vanishes (tab closed without graceful teardown, network dropped, browser
+  // killed), so without an app-level keepalive the local `connections` map
+  // accumulates zombie entries and the UI peer count never decreases. Any
+  // incoming message refreshes a peer's freshness; ping is only sent when no
+  // other traffic has flowed recently.
+  | { t: 'ping' }
+  | { t: 'pong' };
 
 export function encodeTxMsg(tx: Transaction): ProtoMsg {
   return { t: 'tx', data: bytesToHex(encodeTx(tx)) };
