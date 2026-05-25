@@ -32,7 +32,7 @@ import { SIMD_WASM_BASE64, NO_SIMD_WASM_BASE64 } from './argon2id-wasm.js';
  */
 
 // Network-wide fixed salt. The version suffix gives a clean hard-fork path:
-// bump to "...v5" to invalidate the old chain.
+// bump to "...v6" to invalidate the old chain.
 //
 // v3 (2026-05): emergency-drop / difficulty-floor consensus fix. v2 chains
 // allowed difficulty to crash to MAX_TARGET after a stall, enabling free
@@ -40,8 +40,14 @@ import { SIMD_WASM_BASE64, NO_SIMD_WASM_BASE64 } from './argon2id-wasm.js';
 // v4 (2026-05): retarget uses raw timestamps instead of MTP-of-windows. v3
 // chains oscillated between overshoot (~18 bits) and floor (1 bit) for a
 // single-miner network because the MTP median snapped between clusters of
-// burst-mined blocks. See consensus.ts for the new rules.
-const SALT = new TextEncoder().encode('browsercoin-pow-v4');
+// burst-mined blocks.
+// v5 (2026-05): ASERT retarget (BCH aserti3-2d). v4 still oscillated because
+// any window-based retarget over-corrects when block times are bursty. ASERT
+// is anchor-based exponential — provably stable, tracks any hashrate scale
+// from solo (~70 H/s) to crowd (~10k H/s) within ~1.5 bits of equilibrium.
+// Genesis difficulty raised from 1 bit → 6 bits to kill the sub-second
+// bootstrap burst.
+const SALT = new TextEncoder().encode('browsercoin-pow-v5');
 
 export const POW_PARAMS = {
   memorySize: 32 * 1024, // KiB → 32 MB

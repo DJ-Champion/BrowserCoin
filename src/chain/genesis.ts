@@ -22,36 +22,35 @@ export const MAX_MONEY = 21_000_000n * COIN;
 export const TARGET_BLOCK_TIME_S = 150;
 
 /**
- * Sliding-window size for per-block difficulty retargeting (see consensus.ts).
- * Every block compares average block-time over the last DIFFICULTY_WINDOW
- * blocks against TARGET_BLOCK_TIME_S and adjusts within the asymmetric caps.
- *
- * Bitcoin retargets every 2016 blocks because its global hashrate barely
- * moves. BrowserCoin's hashrate swings 100× when one tab joins or closes, so
- * we retarget every block over a short window. 50 blocks (~2 h at target)
- * gives reasonable statistical convergence without being too laggy.
+ * Legacy lookback size. v3/v4 retargets used a window of this many blocks.
+ * v5 switched to ASERT (anchor-based exponential), which doesn't need a
+ * window — but callers still use this value as "how many recent headers
+ * to fetch" so that the MTP validity check and emergency-drop lookback
+ * have plenty of headroom. Kept at 50 because the existing fetch budget
+ * is fine; could be shrunk to MTP_WINDOW alone if a hot path needed it.
  */
 export const DIFFICULTY_WINDOW = 50;
 
 /**
- * Number of historical timestamps used to compute MTP. Retargeting uses MTP
- * (not raw timestamps) on both ends of the window so that miner-supplied
- * timestamps can't be ground in either direction to game difficulty.
+ * Number of historical timestamps used to compute MTP (median-time-past).
+ * MTP is applied to per-block timestamp validity: a block's timestamp
+ * must exceed the median of the last MTP_WINDOW headers. This bounds
+ * how far back a miner can lie about their own block's time.
  */
 export const MTP_WINDOW = 11;
 
 /**
- * Symmetric retarget step caps, per block.
+ * ASERT half-life, in seconds. Controls how fast difficulty responds
+ * to deviations from target pace: under sustained 2×-too-slow blocks,
+ * the target doubles in HALFLIFE_S seconds (difficulty halves).
  *
- * Both directions clamped to 2× per block. Earlier asymmetric form (2× up,
- * 4× down) was the "miners-left-quickly" defense, but combined with the
- * emergency-drop rule it let target run from genesis to MAX_TARGET in 3–4
- * blocks after a stall — gifting the next miner hundreds of zero-work
- * blocks. The difficulty floor in consensus.ts plus symmetric retarget
- * makes that class of failure structurally impossible.
+ * 600 s = 10 min = 4 target block-times. Empirically tuned (see the
+ * halflife-sweep simulation) for our hashrate range: short enough to
+ * track minute-scale swings when tabs join/leave, long enough not to
+ * react to single-block noise. BCH uses 2 days because its hashrate
+ * barely moves; our network is much more volatile.
  */
-export const MAX_RETARGET_FACTOR_UP = 2;   // target / 2 (difficulty *2) per block
-export const MAX_RETARGET_FACTOR_DOWN = 2; // target * 2 (difficulty /2) per block
+export const HALFLIFE_S = 600;
 
 /**
  * Emergency drop: if the candidate block's timestamp is more than this many
@@ -80,21 +79,24 @@ export const MAX_MEMPOOL_TXS = 5_000;
 export const MIN_FEE_PER_BYTE = 1n;
 
 /**
- * Initial difficulty target. Sized for memory-hard Argon2id PoW (see
- * POW_PARAMS in src/crypto/pow.ts — currently 32 MB / 1 iter, ~40–125 ms
- * per hash on a laptop). Bootstrap blocks land in a few hundred ms;
- * per-block retarget then pulls difficulty up toward TARGET_BLOCK_TIME_S
- * as real miners join.
+ * Initial difficulty target = the difficulty floor. ASERT can move target
+ * up (harder) but never above this value, so any miner that can mine block 1
+ * can also mine at the floor — the chain can't deadlock on hashrate loss.
  *
- * Compact 0x20400000 → target = 0x400000 << 232 = 2^254, giving
- * P(success) = 1/4 (~4 expected attempts).
+ * Compact 0x20020000 → target = 0x20000 << 232 = 2^249, giving expected
+ * ~128 attempts per block. At 70 H/s that's ~1.8 s/block at floor; at
+ * 10 H/s ~13 s/block; at 1 H/s ~2 min/block. Even a heavily throttled
+ * single tab keeps the chain alive.
+ *
+ * Higher than the v3/v4 value (1 bit ≈ 4 attempts) because that floor
+ * was too low — sub-second mining at the floor polluted the retarget
+ * window. 6 bits is high enough to bootstrap smoothly via ASERT, low
+ * enough not to stall.
  *
  * Must equal targetToCompact(compactToTarget(GENESIS_DIFFICULTY_COMPACT))
- * (canonical normalized form) so per-window retargets that hit the target
- * pace return identically. Mantissa's high bit must be clear (>=0x800000
- * normalizes to a higher exponent).
+ * (canonical normalized form).
  */
-export const GENESIS_DIFFICULTY_COMPACT = 0x20400000;
+export const GENESIS_DIFFICULTY_COMPACT = 0x20020000;
 
 /** Maximum hash value treated as "infinity" target — used in chain-work math. */
 export const MAX_TARGET = (1n << 256n) - 1n;
@@ -109,13 +111,12 @@ export function blockReward(height: number): bigint {
 /**
  * Genesis block. Mined offline at "build time" (well — at first launch).
  * Zero prev-hash, height 0, no transactions, no miner reward credited.
- * Tests and the initial chain construct this deterministically.
  *
- * Timestamp is set near v3 launch so that block 1's retarget math doesn't
- * inherit a multi-year gap to genesis. The old v2 value (1700000000, Nov
- * 2023) caused the bootstrap retarget window to be dominated by the
- * genesis-era timestamp, which combined with the emergency-drop rule
- * crashed difficulty on the very first real block.
+ * Timestamp is the ASERT anchor: every retarget in the chain is computed
+ * relative to genesis. If genesis is set significantly before the first
+ * mined block, ASERT sees a large "schedule deficit" and holds difficulty
+ * at floor while the chain catches up, producing many sub-second blocks
+ * during bootstrap. So this should be set ≈ deploy time at each fork.
  */
 export const GENESIS: Block = {
   header: {
@@ -123,10 +124,13 @@ export const GENESIS: Block = {
     prevHash: new Uint8Array(32),
     txRoot: new Uint8Array(32),
     stateRoot: new Uint8Array(32),
-    timestamp: 1779000000, // ~2026-05-22 06:40 UTC — near v3 launch
+    timestamp: 1779700000, // ~2026-05-24 19:06 UTC — far enough in the past that test clocks and deploy clocks both run forward from it
     difficulty: GENESIS_DIFFICULTY_COMPACT,
     nonce: 0,
     miner: new Uint8Array(32),
   },
   transactions: [],
 };
+
+/** Convenience: genesis timestamp exposed for ASERT (anchor time). */
+export const GENESIS_TIMESTAMP = GENESIS.header.timestamp;

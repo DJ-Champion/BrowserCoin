@@ -1,28 +1,20 @@
 /**
  * Test utility: mine a block at low difficulty against a chain tip.
- * Lives outside the test files so multiple test suites can reuse it.
  *
- * Default-timestamp strategy: block 1's timestamp anchors well in the past
- * (now − TS_PAST_OFFSET_BLOCKS × target) and each subsequent block adds one
- * target interval. This keeps the per-block retarget seeing blocks-at-target
- * (difficulty stays near genesis) AND keeps every block's timestamp in the
- * past relative to wall clock — required because MAX_FUTURE_TIME_S only
- * grants ~10 minutes of future-timestamp tolerance, so any naive "now + i ×
- * target" scheme runs out after a handful of blocks.
+ * Default-timestamp strategy: every test block lands at exactly
+ * TARGET_BLOCK_TIME_S after its parent, anchored at GENESIS_TIMESTAMP + T
+ * (i.e. block 1 is one target spacing after genesis). Under ASERT this
+ * keeps target pinned at GENESIS difficulty (floor) — every block at
+ * target pace is equilibrium. Timestamps drift forward but stay below
+ * `now + MAX_FUTURE_TIME_S` as long as the suite is run reasonably soon
+ * after the genesis-timestamp constant was set.
  */
 import { hashHeader, computeTxRoot, type Block, type BlockHeader } from './block.js';
 import { checkPoW, nextDifficulty } from './consensus.js';
-import { DIFFICULTY_WINDOW, MTP_WINDOW, TARGET_BLOCK_TIME_S } from './genesis.js';
+import { DIFFICULTY_WINDOW, GENESIS_TIMESTAMP, MTP_WINDOW, TARGET_BLOCK_TIME_S } from './genesis.js';
 import { applyBlockTxs, cloneState, stateRoot, type State } from './state.js';
 import type { Transaction } from './transaction.js';
 import type { Blockchain } from './blockchain.js';
-
-/**
- * How many block-times to backdate block 1 by. Caps the test chain length we
- * can synthesize without timestamps drifting past `now + MAX_FUTURE_TIME_S`.
- * 200 × 150s = 8h of headroom; plenty for any single test.
- */
-const TS_PAST_OFFSET_BLOCKS = 200;
 
 export async function buildBlock(
   chain: Blockchain,
@@ -33,11 +25,12 @@ export async function buildBlock(
   const parent = chain.tip.block.header;
   const height = parent.height + 1;
 
-  // Block 1: anchor in the past so subsequent +TARGET_BLOCK_TIME_S steps
-  // don't run past MAX_FUTURE_TIME_S. Later blocks: parent + one target
-  // interval so the retarget sees a perfectly-paced chain.
+  // Block 1 anchors at GENESIS_TIMESTAMP + T (one spacing past genesis) so
+  // the MTP check (timestamp > genesis_ts) passes. Subsequent blocks step
+  // by one target spacing each — ASERT sees blocks-at-target → target stays
+  // at floor → difficulty stable across the synthetic chain.
   const defaultTimestamp = parent.height === 0
-    ? Math.floor(Date.now() / 1000) - TS_PAST_OFFSET_BLOCKS * TARGET_BLOCK_TIME_S
+    ? GENESIS_TIMESTAMP + TARGET_BLOCK_TIME_S
     : parent.timestamp + TARGET_BLOCK_TIME_S;
   const timestamp = timestampOverride ?? defaultTimestamp;
 
