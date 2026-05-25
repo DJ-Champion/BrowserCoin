@@ -39,6 +39,15 @@ import { parsePort } from './lib/cli.js';
 
 const PORT = parsePort(9000);
 const STALE_PEER_MS = 60_000;
+
+/**
+ * Chain-format version stamp written into the saved JSON. Must match the
+ * client's CHAIN_VERSION (src/node.ts) and the PoW salt (src/crypto/pow.ts).
+ * Bump when any of those change so the server auto-wipes its on-disk chain
+ * on first startup of the new build instead of trying — and failing — to
+ * replay blocks the new validator rejects.
+ */
+const CHAIN_VERSION = 'browsercoin-pow-v3';
 /**
  * A miner is "active" if they reported mining=true within this window. Set
  * to 3× the client heartbeat interval (30s) so a single missed heartbeat
@@ -82,7 +91,20 @@ const MAX_ORPHANS = 2048;
 async function loadChainFromDisk(): Promise<void> {
   try {
     const text = await fs.readFile(CHAIN_FILE, 'utf-8');
-    const data = JSON.parse(text) as { version: number; blocks: string[] };
+    const data = JSON.parse(text) as { version: number; chainVersion?: string; blocks: string[] };
+    // Version gate: if the on-disk chain was written by an incompatible
+    // build, wipe it and start from genesis. Without this, an upgraded
+    // server would try (and noisily fail) to replay every old block under
+    // the new consensus rules until an operator manually deleted the file.
+    if (data.chainVersion !== CHAIN_VERSION) {
+      const found = data.chainVersion ?? '<unset>';
+      console.warn(
+        `[chain] disk chain version "${found}" does not match build "${CHAIN_VERSION}" — ` +
+          `wiping ${path.basename(CHAIN_FILE)} and starting fresh from genesis`,
+      );
+      await fs.rm(CHAIN_FILE, { force: true });
+      return;
+    }
     let replayed = 0;
     for (const hex of data.blocks) {
       const b = decodeBlock(hexToBytes(hex));
@@ -106,7 +128,7 @@ async function saveChainToDiskNow(): Promise<void> {
     if (cb.block.header.height > 0) blocks.unshift(bytesToHex(encodeBlock(cb.block)));
   }
   const tmp = CHAIN_FILE + '.tmp';
-  await fs.writeFile(tmp, JSON.stringify({ version: 1, blocks }));
+  await fs.writeFile(tmp, JSON.stringify({ version: 1, chainVersion: CHAIN_VERSION, blocks }));
   await fs.rename(tmp, CHAIN_FILE);
 }
 

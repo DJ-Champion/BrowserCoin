@@ -41,17 +41,17 @@ export const DIFFICULTY_WINDOW = 50;
 export const MTP_WINDOW = 11;
 
 /**
- * Asymmetric retarget step caps, per block.
+ * Symmetric retarget step caps, per block.
  *
- * Rising difficulty (target shrinks) is clamped tighter than falling
- * difficulty (target grows). The asymmetry is the main defense against
- * "hashrate gaming": an attacker who briefly applies hashrate can only push
- * difficulty up by 2× per block, but when they leave the chain can drop
- * difficulty by 4× per block — so honest miners aren't stuck for long at
- * attacker-inflated difficulty.
+ * Both directions clamped to 2× per block. Earlier asymmetric form (2× up,
+ * 4× down) was the "miners-left-quickly" defense, but combined with the
+ * emergency-drop rule it let target run from genesis to MAX_TARGET in 3–4
+ * blocks after a stall — gifting the next miner hundreds of zero-work
+ * blocks. The difficulty floor in consensus.ts plus symmetric retarget
+ * makes that class of failure structurally impossible.
  */
 export const MAX_RETARGET_FACTOR_UP = 2;   // target / 2 (difficulty *2) per block
-export const MAX_RETARGET_FACTOR_DOWN = 4; // target * 4 (difficulty /4) per block
+export const MAX_RETARGET_FACTOR_DOWN = 2; // target * 2 (difficulty /2) per block
 
 /**
  * Emergency drop: if the candidate block's timestamp is more than this many
@@ -61,8 +61,14 @@ export const MAX_RETARGET_FACTOR_DOWN = 4; // target * 4 (difficulty /4) per blo
  */
 export const EMERGENCY_DROP_MULT = 6;
 
-/** Reject blocks whose timestamp is more than 30 minutes in the future. */
-export const MAX_FUTURE_TIME_S = 30 * 60;
+/**
+ * Reject blocks whose timestamp is more than 10 minutes in the future.
+ * Tighter than Bitcoin's 2h because the smaller window is what bounds a
+ * lone miner's ability to fabricate two consecutive "slow" intervals and
+ * fire the emergency drop (see consensus.ts). 10 min still leaves ample
+ * room for clock skew across browser tabs.
+ */
+export const MAX_FUTURE_TIME_S = 10 * 60;
 
 /** Max serialized block size (browser-friendly cap). */
 export const MAX_BLOCK_BYTES = 256 * 1024;
@@ -104,6 +110,12 @@ export function blockReward(height: number): bigint {
  * Genesis block. Mined offline at "build time" (well — at first launch).
  * Zero prev-hash, height 0, no transactions, no miner reward credited.
  * Tests and the initial chain construct this deterministically.
+ *
+ * Timestamp is set near v3 launch so that block 1's retarget math doesn't
+ * inherit a multi-year gap to genesis. The old v2 value (1700000000, Nov
+ * 2023) caused the bootstrap retarget window to be dominated by the
+ * genesis-era timestamp, which combined with the emergency-drop rule
+ * crashed difficulty on the very first real block.
  */
 export const GENESIS: Block = {
   header: {
@@ -111,7 +123,7 @@ export const GENESIS: Block = {
     prevHash: new Uint8Array(32),
     txRoot: new Uint8Array(32),
     stateRoot: new Uint8Array(32),
-    timestamp: 1700000000, // fixed past timestamp so chain is reproducible
+    timestamp: 1779000000, // ~2026-05-22 06:40 UTC — near v3 launch
     difficulty: GENESIS_DIFFICULTY_COMPACT,
     nonce: 0,
     miner: new Uint8Array(32),

@@ -25,9 +25,9 @@ import {
  * Version tag tied to PoW params + chain genesis. When the network does a
  * hard-fork (e.g. salt bump in pow.ts), bump this so existing IDB caches are
  * cleared on next load — stops the browser from trying to restore blocks that
- * the new server will reject.
+ * the new server will reject. Must stay in lock-step with server/api.ts.
  */
-const CHAIN_VERSION = 'browsercoin-pow-v2';
+export const CHAIN_VERSION = 'browsercoin-pow-v3';
 
 type ChainListener = () => void;
 

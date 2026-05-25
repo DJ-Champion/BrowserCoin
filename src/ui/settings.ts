@@ -1,6 +1,6 @@
 import { exportWalletJson, importWalletJson } from '../storage/wallet.js';
 import { generateKeyPair } from '../crypto/keys.js';
-import type { Node } from '../node.js';
+import { CHAIN_VERSION, type Node } from '../node.js';
 import { cardHeader } from './info.js';
 import { defaultServerLists, parseServerInput } from '../net/servers.js';
 import { clearAll } from '../storage/idb.js';
@@ -295,7 +295,7 @@ https://server2.example"></textarea>
       for (const cb of node.chain.iterateCanonical()) {
         if (cb.block.header.height > 0) blocks.unshift(bytesToHex(encodeBlock(cb.block)));
       }
-      const payload = JSON.stringify({ version: 1, blocks });
+      const payload = JSON.stringify({ version: 1, chainVersion: CHAIN_VERSION, blocks });
       const blob = new Blob([payload], { type: 'application/json' });
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);

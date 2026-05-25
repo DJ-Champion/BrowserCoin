@@ -13,6 +13,18 @@ import {
 } from './genesis.js';
 
 /**
+ * Hard floor on difficulty (= ceiling on target). The target produced by
+ * `nextDifficulty` is clamped to this — neither the emergency drop nor the
+ * normal retarget can take the chain below GENESIS's difficulty. Without
+ * this clamp, repeated stalls let target run all the way up to MAX_TARGET
+ * (every random hash meets the target), at which point block production
+ * costs nothing and arbitrary reorgs become free. The floor matches the
+ * bootstrap difficulty: anything that can mine block 1 of the chain can
+ * also mine at the floor, so this never deadlocks the network.
+ */
+const FLOOR_TARGET = compactToTarget(GENESIS_DIFFICULTY_COMPACT);
+
+/**
  * True if the header's PoW hash is below its claimed target.
  *
  * Uses memory-hard Argon2id (not the block-ID sha256). One verify costs
@@ -36,14 +48,19 @@ export async function checkPoW(header: BlockHeader): Promise<boolean> {
  *      one at the window start and one at the window end — instead of raw
  *      header timestamps. A miner who lies on a single timestamp moves MTP
  *      by less than 1/11 of the lie.
- *   2. The retarget step is asymmetric: target may shrink by at most
- *      MAX_RETARGET_FACTOR_UP per block (difficulty rises slowly) but may
- *      grow by up to MAX_RETARGET_FACTOR_DOWN per block (difficulty falls
- *      quickly). An attacker who spikes hashrate can't pin difficulty high
- *      after they leave.
- *   3. Emergency drop: if the candidate's timestamp is more than
- *      EMERGENCY_DROP_MULT × target seconds past the parent's timestamp,
- *      the chain is treated as stalled and difficulty halves immediately.
+ *   2. The retarget step is symmetric: target may move by at most a factor
+ *      of MAX_RETARGET_FACTOR_UP per block in either direction. A wider
+ *      "down" step (v2 used 4×) compounded with the emergency drop to
+ *      crash difficulty to MAX_TARGET in just a few blocks after a stall.
+ *   3. Emergency drop requires TWO consecutive slow intervals: both the
+ *      candidate's gap from its parent AND the parent's gap from its
+ *      grandparent must exceed EMERGENCY_DROP_MULT × target. A lone
+ *      attacker can't fabricate the grandparent's timestamp, so they
+ *      can't manufacture a one-off discounted block.
+ *   4. Floor: the returned target is clamped to FLOOR_TARGET, so even
+ *      sustained stalls can't take difficulty below the chain's bootstrap
+ *      value. This is the structural guarantee that block production
+ *      always costs at least the genesis amount of work.
  *
  * `previousHeaders` should contain the parent chain headers, sorted
  * ascending. The function reads up to DIFFICULTY_WINDOW + MTP_WINDOW − 1
@@ -58,15 +75,23 @@ export function nextDifficulty(
   const prev = previousHeaders[previousHeaders.length - 1]!;
   const prevTarget = compactToTarget(prev.difficulty);
 
-  // Emergency drop fires even before we have a full window. Useful at chain
-  // bootstrap when hashrate is wildly underestimated.
-  if (
-    candidateTimestamp !== undefined &&
-    candidateTimestamp - prev.timestamp > EMERGENCY_DROP_MULT * TARGET_BLOCK_TIME_S
-  ) {
-    let dropped = prevTarget * 2n;
-    if (dropped > MAX_TARGET) dropped = MAX_TARGET;
-    return targetToCompact(dropped);
+  // Emergency drop — fires only when BOTH the candidate's gap from its parent
+  // AND the parent's gap from its grandparent exceed the threshold. The
+  // grandparent timestamp is consensus history that no single miner controls,
+  // so this gates the rule against one-off "set my timestamp to parent+901s"
+  // discount-mining. Genesis is never counted as a grandparent (its hardcoded
+  // timestamp would always trip the rule).
+  if (candidateTimestamp !== undefined && previousHeaders.length >= 2) {
+    const grand = previousHeaders[previousHeaders.length - 2]!;
+    if (grand.height > 0) {
+      const slowParent = prev.timestamp - grand.timestamp > EMERGENCY_DROP_MULT * TARGET_BLOCK_TIME_S;
+      const slowCandidate = candidateTimestamp - prev.timestamp > EMERGENCY_DROP_MULT * TARGET_BLOCK_TIME_S;
+      if (slowParent && slowCandidate) {
+        let dropped = prevTarget * 2n;
+        if (dropped > FLOOR_TARGET) dropped = FLOOR_TARGET;
+        return targetToCompact(dropped);
+      }
+    }
   }
 
   // Need at least 2 *non-genesis* blocks to measure a real block-time delta.
@@ -93,15 +118,15 @@ export function nextDifficulty(
   const startMTP = mtpUpTo(previousHeaders, firstIdx);
   const actualSpan = Math.max(1, endMTP - startMTP);
 
-  // Clamp actualSpan so the resulting target moves at most:
-  //   * by /MAX_RETARGET_FACTOR_UP when blocks are too fast (target shrinks)
-  //   * by *MAX_RETARGET_FACTOR_DOWN when blocks are too slow (target grows)
+  // Clamp actualSpan so the resulting target moves at most a factor of
+  // MAX_RETARGET_FACTOR_{UP,DOWN} per block. With symmetric caps these are
+  // equal — kept as separate names for clarity.
   const minActual = Math.floor(expectedSpan / MAX_RETARGET_FACTOR_UP);
   const maxActual = expectedSpan * MAX_RETARGET_FACTOR_DOWN;
   const clampedActual = Math.max(minActual, Math.min(maxActual, actualSpan));
 
   let newTarget = (prevTarget * BigInt(clampedActual)) / BigInt(expectedSpan);
-  if (newTarget > MAX_TARGET) newTarget = MAX_TARGET;
+  if (newTarget > FLOOR_TARGET) newTarget = FLOOR_TARGET;
   if (newTarget < 1n) newTarget = 1n;
   return targetToCompact(newTarget);
 }

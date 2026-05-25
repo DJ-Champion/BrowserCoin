@@ -27,7 +27,7 @@ function fakeHeader(height: number, timestamp: number, difficulty: number): Bloc
 
 const LOOKBACK = DIFFICULTY_WINDOW + MTP_WINDOW - 1;
 
-describe('difficulty (per-block sliding window, MTP-derived, asymmetric clamp)', () => {
+describe('difficulty (per-block sliding window, MTP-derived, symmetric clamp, floored)', () => {
   it('keeps difficulty unchanged when blocks land exactly at target', () => {
     const headers: BlockHeader[] = [];
     for (let i = 0; i <= 100; i++) headers.push(fakeHeader(i, 1_000 + i * TARGET_BLOCK_TIME_S, GENESIS_DIFFICULTY_COMPACT));
@@ -46,14 +46,31 @@ describe('difficulty (per-block sliding window, MTP-derived, asymmetric clamp)',
     expect(compactToTarget(next)).toBeLessThan(compactToTarget(GENESIS_DIFFICULTY_COMPACT));
   });
 
-  it('makes difficulty easier (larger target) when blocks are too slow', () => {
+  it('makes difficulty easier (larger target) when blocks are too slow, up to the floor', () => {
+    // Start at 4× the genesis difficulty so retarget has room to ease without
+    // immediately hitting the floor at GENESIS.
+    const harder = targetToCompact(compactToTarget(GENESIS_DIFFICULTY_COMPACT) / 4n);
     const headers: BlockHeader[] = [];
     for (let i = 0; i < LOOKBACK; i++) {
-      headers.push(fakeHeader(i, 1_000 + i * TARGET_BLOCK_TIME_S * 2, GENESIS_DIFFICULTY_COMPACT));
+      headers.push(fakeHeader(i, 1_000 + i * TARGET_BLOCK_TIME_S * 2, harder));
     }
     const candidateTs = headers[headers.length - 1]!.timestamp + TARGET_BLOCK_TIME_S * 2;
     const next = nextDifficulty(LOOKBACK, headers, candidateTs);
-    expect(compactToTarget(next)).toBeGreaterThan(compactToTarget(GENESIS_DIFFICULTY_COMPACT));
+    expect(compactToTarget(next)).toBeGreaterThan(compactToTarget(harder));
+  });
+
+  it('clamps target to the floor — difficulty cannot fall below GENESIS', () => {
+    // Run blocks at the floor difficulty with extreme gaps. The retarget wants
+    // to ease (target should grow), but the floor must hold it at GENESIS.
+    // Without this, sustained stalls let target run to MAX_TARGET and block
+    // production becomes free.
+    const headers: BlockHeader[] = [];
+    for (let i = 0; i < LOOKBACK; i++) {
+      headers.push(fakeHeader(i, 1_000 + i * TARGET_BLOCK_TIME_S * 100, GENESIS_DIFFICULTY_COMPACT));
+    }
+    const candidateTs = headers[headers.length - 1]!.timestamp + TARGET_BLOCK_TIME_S * 100;
+    const next = nextDifficulty(LOOKBACK, headers, candidateTs);
+    expect(next).toBe(GENESIS_DIFFICULTY_COMPACT);
   });
 
   it('asymmetric clamp: extreme-fast blocks clamp UP by at most MAX_RETARGET_FACTOR_UP', () => {
@@ -70,15 +87,17 @@ describe('difficulty (per-block sliding window, MTP-derived, asymmetric clamp)',
     expect(newTarget * BigInt(MAX_RETARGET_FACTOR_UP)).toBeGreaterThanOrEqual(oldTarget - 1n);
   });
 
-  it('asymmetric clamp: extreme-slow blocks clamp DOWN by at most MAX_RETARGET_FACTOR_DOWN', () => {
+  it('symmetric clamp: extreme-slow blocks ease DOWN by at most MAX_RETARGET_FACTOR_DOWN', () => {
+    // Start 4× harder than GENESIS so the eased target stays well below the floor.
+    const harder = targetToCompact(compactToTarget(GENESIS_DIFFICULTY_COMPACT) / 4n);
     const headers: BlockHeader[] = [];
     for (let i = 0; i < LOOKBACK; i++) {
-      // 100x slower than expected — should clamp to DOWN factor (e.g. 4x easier, target *= 4).
-      headers.push(fakeHeader(i, 1_000 + i * TARGET_BLOCK_TIME_S * 100, GENESIS_DIFFICULTY_COMPACT));
+      // 100x slower than expected — should clamp to DOWN factor.
+      headers.push(fakeHeader(i, 1_000 + i * TARGET_BLOCK_TIME_S * 100, harder));
     }
     const candidateTs = headers[headers.length - 1]!.timestamp + TARGET_BLOCK_TIME_S;
     const next = nextDifficulty(LOOKBACK, headers, candidateTs);
-    const oldTarget = compactToTarget(GENESIS_DIFFICULTY_COMPACT);
+    const oldTarget = compactToTarget(harder);
     const newTarget = compactToTarget(next);
     // target must not have grown more than MAX_RETARGET_FACTOR_DOWN.
     expect(newTarget).toBeLessThanOrEqual(oldTarget * BigInt(MAX_RETARGET_FACTOR_DOWN) + 1n);
@@ -86,22 +105,57 @@ describe('difficulty (per-block sliding window, MTP-derived, asymmetric clamp)',
     expect(newTarget).toBeGreaterThan(oldTarget);
   });
 
-  it('asymmetric: rises slower than it falls (UP factor < DOWN factor)', () => {
-    expect(MAX_RETARGET_FACTOR_UP).toBeLessThan(MAX_RETARGET_FACTOR_DOWN);
+  it('symmetric retarget: UP and DOWN factors are equal', () => {
+    // v2 had asymmetric (2×/4×) which compounded with the emergency drop to
+    // crash difficulty after a stall. v3 uses symmetric caps; the floor takes
+    // over the "miners-left" recovery role.
+    expect(MAX_RETARGET_FACTOR_UP).toBe(MAX_RETARGET_FACTOR_DOWN);
   });
 
-  it('emergency drop fires when candidate timestamp is >EMERGENCY_DROP_MULT × target past parent', () => {
+  it('emergency drop fires when TWO consecutive intervals exceed the threshold', () => {
+    // Start 4× harder than GENESIS so the post-drop target is below the floor.
+    const harder = targetToCompact(compactToTarget(GENESIS_DIFFICULTY_COMPACT) / 4n);
     const headers: BlockHeader[] = [];
-    for (let i = 0; i < LOOKBACK; i++) headers.push(fakeHeader(i, 1_000 + i * TARGET_BLOCK_TIME_S, GENESIS_DIFFICULTY_COMPACT));
-    const prevTs = headers[headers.length - 1]!.timestamp;
-    // Candidate timestamp is way past — emergency drop should halve difficulty.
-    const candidateTs = prevTs + (EMERGENCY_DROP_MULT + 1) * TARGET_BLOCK_TIME_S;
+    for (let i = 0; i < LOOKBACK; i++) headers.push(fakeHeader(i, 1_000 + i * TARGET_BLOCK_TIME_S, harder));
+    // First slow interval: push the parent's timestamp far past the grandparent.
+    headers[headers.length - 1]!.timestamp = headers[headers.length - 2]!.timestamp
+      + (EMERGENCY_DROP_MULT + 1) * TARGET_BLOCK_TIME_S;
+    // Second slow interval: candidate timestamp far past the parent.
+    const candidateTs = headers[headers.length - 1]!.timestamp + (EMERGENCY_DROP_MULT + 1) * TARGET_BLOCK_TIME_S;
     const next = nextDifficulty(LOOKBACK, headers, candidateTs);
-    const oldTarget = compactToTarget(GENESIS_DIFFICULTY_COMPACT);
+    const oldTarget = compactToTarget(harder);
     const newTarget = compactToTarget(next);
-    // newTarget should be ~2× oldTarget (difficulty halved).
+    // Drop halves difficulty (doubles target).
     expect(newTarget).toBeGreaterThan(oldTarget);
     expect(newTarget).toBeLessThanOrEqual(oldTarget * 2n + 1n);
+  });
+
+  it('emergency drop does NOT fire on a single slow interval (blocks discount-mining)', () => {
+    // Parent landed on time; only the candidate's interval is slow. The
+    // attacker controls their own timestamp but not the parent's, so this
+    // gating is what stops them from manufacturing a cheap block at will.
+    const harder = targetToCompact(compactToTarget(GENESIS_DIFFICULTY_COMPACT) / 4n);
+    const headers: BlockHeader[] = [];
+    for (let i = 0; i < LOOKBACK; i++) headers.push(fakeHeader(i, 1_000 + i * TARGET_BLOCK_TIME_S, harder));
+    const candidateTs = headers[headers.length - 1]!.timestamp + (EMERGENCY_DROP_MULT + 1) * TARGET_BLOCK_TIME_S;
+    const next = nextDifficulty(LOOKBACK, headers, candidateTs);
+    const oldTarget = compactToTarget(harder);
+    const newTarget = compactToTarget(next);
+    // No emergency halving — only the normal retarget growth (≤ MAX_RETARGET_FACTOR_DOWN×).
+    expect(newTarget).toBeLessThanOrEqual(oldTarget * BigInt(MAX_RETARGET_FACTOR_DOWN) + 1n);
+  });
+
+  it('emergency drop never fires when the grandparent is genesis', () => {
+    // Genesis has a hardcoded timestamp; counting its gap would make every
+    // new chain emergency-drop on block 2. The rule must exempt genesis as
+    // a grandparent.
+    const harder = targetToCompact(compactToTarget(GENESIS_DIFFICULTY_COMPACT) / 4n);
+    const genesis = fakeHeader(0, 1_700_000_000, harder); // years ago
+    const block1 = fakeHeader(1, 1_779_000_000, harder);  // huge gap from genesis
+    const candidateTs = block1.timestamp + (EMERGENCY_DROP_MULT + 1) * TARGET_BLOCK_TIME_S;
+    const next = nextDifficulty(2, [genesis, block1], candidateTs);
+    // Not enough data for the normal retarget either (length < 3) → returns prev.
+    expect(next).toBe(harder);
   });
 
   it('first retarget does NOT make difficulty easier because of stale genesis timestamp', () => {
