@@ -523,11 +523,11 @@ export function mountMiner(host: HTMLElement, node: Node): () => void {
       if (s.autoLocked) {
         detail = `locked at ${s.workerCount} after an OOM — raise Max if you want to retry`;
       } else if (!s.running) {
-        detail = `will probe up from ${s.workerCount} every 10s once you Start mining`;
+        detail = `starting at ${s.workerCount}, will probe up toward ${s.autoMaxThreads} every 10s once you Start mining`;
       } else if (s.workerCount >= s.autoMaxThreads) {
         detail = `holding at ${s.workerCount} (hit Max). Raise Max to push further`;
       } else {
-        detail = `probing up from ${s.workerCount} toward ${s.autoMaxThreads} every 10s — backs off on OOM`;
+        detail = `at ${s.workerCount}, probing toward ${s.autoMaxThreads} every 10s — backs off and locks on OOM`;
       }
       autoStatusEl.textContent = `Auto: ${detail}.`;
     }

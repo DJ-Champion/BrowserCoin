@@ -205,17 +205,21 @@ export class MinerController {
     if (this.status.autoMinThreads > this.status.autoMaxThreads) {
       this.status.autoMinThreads = this.status.autoMaxThreads;
     }
-    // When the user *just toggled into* auto, always snap to autoMin so the
-    // tuner has a known starting point and the UI gives obvious feedback
-    // ("threads dropped to 1, climbing up"). Without this, e.g. setting
-    // threads to 11 then ticking auto with autoMax=11 would look like a
-    // no-op — auto stays at 11 because it's technically in-range.
+    // When the user *just toggled into* auto, snap to the midpoint of the
+    // bounds (ceil(autoMax / 2), clamped to autoMin). Starting at 1 was
+    // safe but slow — typical hardware sits comfortably around half of
+    // hwConcurrency for memory-bound PoW, so we anchor there and let the
+    // tuner probe up (no OOM) or down (an OOM drops it and locks).
     //
     // If auto was already on and only the bounds changed, just clamp the
-    // current value into the new range without forcing the floor.
+    // current value into the new range without forcing the midpoint.
     if (this.status.mode === 'auto') {
       if (transitionedToAuto) {
-        this.setWorkerCount(this.status.autoMinThreads);
+        const mid = Math.max(
+          this.status.autoMinThreads,
+          Math.min(this.status.autoMaxThreads, Math.ceil(this.status.autoMaxThreads / 2)),
+        );
+        this.setWorkerCount(mid);
       } else if (this.status.workerCount < this.status.autoMinThreads) {
         this.setWorkerCount(this.status.autoMinThreads);
       } else if (this.status.workerCount > this.status.autoMaxThreads) {

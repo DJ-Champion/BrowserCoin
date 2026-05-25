@@ -410,7 +410,7 @@ export function mountHome(host: HTMLElement, node: Node, router: Router): () => 
       if (s.autoLocked) {
         detail = `locked at ${s.workerCount} after OOM`;
       } else if (!s.running) {
-        detail = `${s.workerCount} → probing up to ${s.autoMaxThreads} once mining`;
+        detail = `starts at ${s.workerCount}, climbs toward ${s.autoMaxThreads} when mining`;
       } else if (s.workerCount >= s.autoMaxThreads) {
         detail = `${s.workerCount} (at Max ${s.autoMaxThreads})`;
       } else {
