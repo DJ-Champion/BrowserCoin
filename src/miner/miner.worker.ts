@@ -40,20 +40,32 @@ type StopMsg = { type: 'stop' };
 type Msg = StartMsg | StopMsg;
 
 let mining = false;
+// Generation counter: bumped on every start/stop. A running grind() captures
+// its generation at entry and exits the moment the counter moves past it.
+// Without this, a stop+start pair (which restartTemplate fires after every
+// block we mine) can race with an in-flight `await powHash()`: by the time
+// the old hash resolves, `mining` is true again so the old loop keeps going,
+// stacking a second concurrent grind on top of the new one. After enough
+// blocks the worker is running N stale grinds all hashing outdated templates
+// and starving the live one of CPU + Argon2id memory — the "mining slows to
+// a crawl after a few hours and a restart fixes it" symptom.
+let generation = 0;
 
 self.onmessage = (e: MessageEvent<Msg>) => {
   const msg = e.data;
   if (msg.type === 'stop') {
     mining = false;
+    generation++;
     return;
   }
   if (msg.type === 'start') {
     mining = true;
-    void grind(msg);
+    const myGen = ++generation;
+    void grind(msg, myGen);
   }
 };
 
-async function grind(msg: StartMsg): Promise<void> {
+async function grind(msg: StartMsg, myGen: number): Promise<void> {
   const header = new Uint8Array(msg.headerBytes); // own copy; we mutate
   const target = BigInt('0x' + msg.targetHex);
   const throttle = clamp01(msg.throttle);
@@ -63,7 +75,7 @@ async function grind(msg: StartMsg): Promise<void> {
   let report = performance.now();
   let workWindowStart = report;
 
-  while (mining) {
+  while (mining && myGen === generation) {
     for (let i = 0; i < BATCH; i++) {
       // Write u32 BE nonce into header.
       header[NONCE_OFFSET]     = (nonce >>> 24) & 0xff;
