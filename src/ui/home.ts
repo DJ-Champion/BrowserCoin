@@ -407,14 +407,14 @@ export function mountHome(host: HTMLElement, node: Node, router: Router): () => 
     applyAutoStateToHomeUI(s.mode === 'auto');
     if (s.mode === 'auto') {
       let detail: string;
-      if (s.autoLocked) {
-        detail = `locked at ${s.workerCount} after OOM`;
-      } else if (!s.running) {
-        detail = `starts at ${s.workerCount}, climbs toward ${s.autoMaxThreads} when mining`;
+      if (!s.running) {
+        detail = `will start at Max (${s.autoMaxThreads}) when mining`;
+      } else if (s.autoLocked) {
+        detail = `${s.workerCount} (settled after OOM from Max ${s.autoMaxThreads})`;
       } else if (s.workerCount >= s.autoMaxThreads) {
-        detail = `${s.workerCount} (at Max ${s.autoMaxThreads})`;
+        detail = `${s.workerCount} (at Max)`;
       } else {
-        detail = `${s.workerCount} → ${s.autoMaxThreads} (probing every 10s)`;
+        detail = `${s.workerCount} of [${s.autoMinThreads}–${s.autoMaxThreads}]`;
       }
       autoStatusEl.textContent = `Threads (auto): ${detail}`;
     }

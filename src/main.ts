@@ -42,7 +42,10 @@ void node.start();
   const max = maxMinerWorkers();
   // New mode-aware settings, with sensible defaults for first-time users.
   const mode = (localStorage.getItem('browsercoin:miner-mode') === 'manual') ? 'manual' : 'auto';
-  const defaultAutoMax = Math.max(2, Math.floor(max / 2));
+  // Default Max = all cores. With the new argon2id lib, OOM is rare enough
+  // that "try to use everything" is the right default; the tuner backs off
+  // automatically if the machine pushes back.
+  const defaultAutoMax = max;
   const rawAutoMin = Number(localStorage.getItem('browsercoin:miner-auto-min'));
   const autoMin = Number.isFinite(rawAutoMin) && rawAutoMin >= 1 ? Math.min(max, Math.floor(rawAutoMin)) : 1;
   const rawAutoMax = Number(localStorage.getItem('browsercoin:miner-auto-max'));

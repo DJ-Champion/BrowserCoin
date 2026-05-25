@@ -98,7 +98,7 @@ export class MinerController {
     mode: 'auto',
     powerLevel: 'medium',
     autoMinThreads: 1,
-    autoMaxThreads: Math.max(2, Math.floor(maxMinerWorkers() / 2)),
+    autoMaxThreads: maxMinerWorkers(),
     autoLocked: false,
   };
 
@@ -205,21 +205,18 @@ export class MinerController {
     if (this.status.autoMinThreads > this.status.autoMaxThreads) {
       this.status.autoMinThreads = this.status.autoMaxThreads;
     }
-    // When the user *just toggled into* auto, snap to the midpoint of the
-    // bounds (ceil(autoMax / 2), clamped to autoMin). Starting at 1 was
-    // safe but slow — typical hardware sits comfortably around half of
-    // hwConcurrency for memory-bound PoW, so we anchor there and let the
-    // tuner probe up (no OOM) or down (an OOM drops it and locks).
+    // When the user *just toggled into* auto, snap straight to autoMax —
+    // the goal is to use as much of the machine as it can handle. The
+    // tuner then drops -1 per probe interval on OOM until it stabilises,
+    // and locks (no probing back up) so we don't oscillate. With the new
+    // argon2id lib OOMs are rare, so most machines just hold at the
+    // ceiling.
     //
     // If auto was already on and only the bounds changed, just clamp the
-    // current value into the new range without forcing the midpoint.
+    // current value into the new range without forcing the ceiling.
     if (this.status.mode === 'auto') {
       if (transitionedToAuto) {
-        const mid = Math.max(
-          this.status.autoMinThreads,
-          Math.min(this.status.autoMaxThreads, Math.ceil(this.status.autoMaxThreads / 2)),
-        );
-        this.setWorkerCount(mid);
+        this.setWorkerCount(this.status.autoMaxThreads);
       } else if (this.status.workerCount < this.status.autoMinThreads) {
         this.setWorkerCount(this.status.autoMinThreads);
       } else if (this.status.workerCount > this.status.autoMaxThreads) {

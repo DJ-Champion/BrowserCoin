@@ -100,10 +100,10 @@ export function mountMiner(host: HTMLElement, node: Node): () => void {
               <input type="number" min="1" max="${maxThreads}" value="1" class="mono" style="width:60px; margin-left:6px;" data-w="autoMin" />
             </label>
             <label class="text-sm" style="flex:1;">Max threads
-              <input type="number" min="1" max="${maxThreads}" value="${Math.max(2, Math.floor(maxThreads / 2))}" class="mono" style="width:60px; margin-left:6px;" data-w="autoMax" />
+              <input type="number" min="1" max="${maxThreads}" value="${maxThreads}" class="mono" style="width:60px; margin-left:6px;" data-w="autoMax" />
             </label>
           </div>
-          <p class="text-sm muted" style="margin:6px 0 0;" data-w="autoStatus">The tuner stays within these bounds, probing up until your machine pushes back. Default Max is half your cores — raise it if you have RAM to spare.</p>
+          <p class="text-sm muted" style="margin:6px 0 0;" data-w="autoStatus">Auto starts at Max and backs off only if your machine pushes back. Lower Max if you want to be gentler on memory.</p>
         </div>
       </section>
 
@@ -520,14 +520,16 @@ export function mountMiner(host: HTMLElement, node: Node): () => void {
     // Status line (only visible in auto mode — the autoBounds box is shown).
     if (s.mode === 'auto') {
       let detail: string;
-      if (s.autoLocked) {
-        detail = `locked at ${s.workerCount} after an OOM — raise Max if you want to retry`;
-      } else if (!s.running) {
-        detail = `starting at ${s.workerCount}, will probe up toward ${s.autoMaxThreads} every 10s once you Start mining`;
+      if (!s.running) {
+        detail = `will start at Max (${s.autoMaxThreads}) when you Start mining`;
+      } else if (s.autoLocked && s.workerCount > s.autoMinThreads) {
+        detail = `settled at ${s.workerCount} after backing off from Max ${s.autoMaxThreads} (OOM). Raise Max if you want to retry`;
+      } else if (s.autoLocked) {
+        detail = `at Min ${s.autoMinThreads} after repeated OOM — lower Max or check memory`;
       } else if (s.workerCount >= s.autoMaxThreads) {
-        detail = `holding at ${s.workerCount} (hit Max). Raise Max to push further`;
+        detail = `running at Max (${s.workerCount}). Will drop on OOM`;
       } else {
-        detail = `at ${s.workerCount}, probing toward ${s.autoMaxThreads} every 10s — backs off and locks on OOM`;
+        detail = `at ${s.workerCount} of [${s.autoMinThreads}–${s.autoMaxThreads}], holding`;
       }
       autoStatusEl.textContent = `Auto: ${detail}.`;
     }
