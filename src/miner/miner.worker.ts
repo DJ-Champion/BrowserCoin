@@ -76,6 +76,7 @@ async function grind(msg: StartMsg, myGen: number): Promise<void> {
   let workWindowStart = report;
 
   while (mining && myGen === generation) {
+    let completed = 0;
     for (let i = 0; i < BATCH; i++) {
       // Write u32 BE nonce into header.
       header[NONCE_OFFSET]     = (nonce >>> 24) & 0xff;
@@ -83,7 +84,22 @@ async function grind(msg: StartMsg, myGen: number): Promise<void> {
       header[NONCE_OFFSET + 2] = (nonce >>> 8) & 0xff;
       header[NONCE_OFFSET + 3] = nonce & 0xff;
 
-      const h = await powHash(header);
+      // hash-wasm instantiates a fresh 32MB WebAssembly.Memory for every
+      // Argon2id call. With many workers contending for the browser's
+      // process-wide WASM memory budget, that allocation can fail with a
+      // RangeError ("Out of memory: Cannot allocate Wasm memory…"). An
+      // unhandled rejection would silently kill this grind loop and leave
+      // the worker permanently idle — telegraph it to the main thread,
+      // back off briefly so the OS can release pages, and retry the same
+      // nonce on the next outer iteration.
+      let h: Uint8Array;
+      try {
+        h = await powHash(header);
+      } catch {
+        (self as DedicatedWorkerGlobalScope).postMessage({ type: 'oom' });
+        await sleep(500);
+        break;
+      }
       if (hashMeetsTarget(h, target)) {
         (self as DedicatedWorkerGlobalScope).postMessage({
           type: 'solved',
@@ -95,6 +111,7 @@ async function grind(msg: StartMsg, myGen: number): Promise<void> {
         // in a fresh template.
       }
       nonce = (nonce + 1) >>> 0;
+      completed++;
       if (nonce === msg.startNonce) {
         // Wrapped through the whole 32-bit nonce space without a solution.
         // Ask main thread for a fresh template (different timestamp or txs).
@@ -102,7 +119,7 @@ async function grind(msg: StartMsg, myGen: number): Promise<void> {
         return;
       }
     }
-    hashes += BATCH;
+    hashes += completed;
 
     const now = performance.now();
     if (now - report >= 1000) {

@@ -29,6 +29,11 @@ export interface MinerStatus {
   /** Number of `restartTemplate()` calls since `start()` — surfaces tip
    *  thrashing in the UI. */
   attemptCount: number;
+  /** Count of WebAssembly OOM events reported by workers since `start()`.
+   *  Each is a single Argon2id allocation rejection — the worker retried
+   *  and kept going, but a non-zero count is a strong signal the user has
+   *  too many threads for their available WASM memory. */
+  oomCount: number;
   /** Last reason start() refused. Cleared on a successful start. */
   blockedReason?: string;
 }
@@ -36,7 +41,8 @@ export interface MinerStatus {
 type WorkerSolved = { type: 'solved'; nonce: number; hash: Uint8Array };
 type WorkerHashrate = { type: 'hashrate'; hashesPerSecond: number; deltaHashes: number };
 type WorkerExhausted = { type: 'exhausted' };
-type WorkerOut = WorkerSolved | WorkerHashrate | WorkerExhausted;
+type WorkerOom = { type: 'oom' };
+type WorkerOut = WorkerSolved | WorkerHashrate | WorkerExhausted | WorkerOom;
 
 export function maxMinerWorkers(): number {
   return (typeof navigator !== 'undefined' && navigator.hardwareConcurrency) || 1;
@@ -67,6 +73,7 @@ export class MinerController {
     totalHashes: 0,
     attemptStartedAt: null,
     attemptCount: 0,
+    oomCount: 0,
   };
   private statusListeners = new Set<(s: MinerStatus) => void>();
   private currentTemplate: { block: Block } | null = null;
@@ -138,6 +145,7 @@ export class MinerController {
     this.status.totalHashes = 0;
     this.status.attemptCount = 0;
     this.status.attemptStartedAt = null;
+    this.status.oomCount = 0;
     this.spawnWorkers();
     this.restartTemplate();
     this.startHealthTimer();
@@ -289,6 +297,19 @@ export class MinerController {
         this.status.workerLastReportAt = this.workerLastReportAt.slice();
         this.emit();
       }
+      return;
+    }
+    if (msg.type === 'oom') {
+      // Worker is alive but bouncing off the browser's WebAssembly memory
+      // ceiling. Count it and refresh `lastReportAt` so the auto-respawn
+      // doesn't fire (the worker is going to retry — terminating it would
+      // just waste the partial work it's done).
+      if (idx < this.workerLastReportAt.length) {
+        this.workerLastReportAt[idx] = performance.now();
+        this.status.workerLastReportAt = this.workerLastReportAt.slice();
+      }
+      this.status.oomCount++;
+      this.emit();
       return;
     }
     if (msg.type === 'exhausted') {

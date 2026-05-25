@@ -129,6 +129,11 @@ export function mountMiner(host: HTMLElement, node: Node): () => void {
             <div class="stat-value mono" data-w="diagAvgRate">—</div>
             <div class="stat-sub" data-w="diagAvgRateSub">total — hashes this session</div>
           </div>
+          <div class="stat-tile" data-w="diagOomTile" style="grid-column: 1 / -1;">
+            <div class="stat-label">WebAssembly OOM events</div>
+            <div class="stat-value mono" data-w="diagOom">0</div>
+            <div class="stat-sub" data-w="diagOomSub">workers retry automatically; non-zero usually means too many threads</div>
+          </div>
         </div>
       </div>
     </section>
@@ -198,6 +203,8 @@ export function mountMiner(host: HTMLElement, node: Node): () => void {
   const diagPFoundSub = view.querySelector<HTMLElement>('[data-w="diagPFoundSub"]')!;
   const diagAvgRate = view.querySelector<HTMLElement>('[data-w="diagAvgRate"]')!;
   const diagAvgRateSub = view.querySelector<HTMLElement>('[data-w="diagAvgRateSub"]')!;
+  const diagOom = view.querySelector<HTMLElement>('[data-w="diagOom"]')!;
+  const diagOomSub = view.querySelector<HTMLElement>('[data-w="diagOomSub"]')!;
 
   // Session-level baselines that don't belong in the controller — they bracket
   // "since the user pressed Start in this view" rather than controller lifetime.
@@ -356,6 +363,12 @@ export function mountMiner(host: HTMLElement, node: Node): () => void {
       `${formatHashNumber(avg)} ${formatHashUnit(avg)} / ${formatHashNumber(s.hashesPerSecond)} ${formatHashUnit(s.hashesPerSecond)}`;
     diagAvgRateSub.textContent = `total ${formatBig(BigInt(Math.max(0, Math.floor(s.totalHashes))))} hashes this session`;
 
+    diagOom.textContent = String(s.oomCount);
+    diagOom.style.color = s.oomCount > 0 ? 'var(--red)' : '';
+    diagOomSub.textContent = s.oomCount > 0
+      ? `${s.oomCount} Argon2id allocations rejected by the browser — workers retried and kept going`
+      : `workers retry automatically; non-zero usually means too many threads`;
+
     // Count stale workers and surface oversubscription separately from a
     // single dead worker — Argon2id is memory-bandwidth bound, and 8+ stalls
     // out of 11 means the thread count is fighting itself rather than one
@@ -368,7 +381,13 @@ export function mountMiner(host: HTMLElement, node: Node): () => void {
 
     // Soft-hint banner. Highest-severity first; only one shown at a time.
     let hint: { cls: string; html: string } | null = null;
-    if (staleCount >= 2 && staleCount >= rates.length / 2) {
+    if (s.oomCount > 0) {
+      const suggest = Math.max(2, Math.floor(rates.length / 2));
+      hint = {
+        cls: 'conn-strip bad',
+        html: `<span class="dot"></span> Browser rejected ${s.oomCount} WebAssembly memory allocation${s.oomCount === 1 ? '' : 's'} — too many threads for your available RAM. Workers retried automatically, but <b>lowering the threads slider to ~${suggest}</b> will get you a higher effective hashrate.`,
+      };
+    } else if (staleCount >= 2 && staleCount >= rates.length / 2) {
       hint = {
         cls: 'conn-strip bad',
         html: `<span class="dot"></span> ${staleCount} of ${rates.length} workers stalled — likely too many threads for your memory bandwidth. The controller is auto-respawning them; <b>lowering the threads slider to ~${Math.max(2, Math.floor(rates.length / 2))}</b> usually mines faster on memory-bound PoW.`,
