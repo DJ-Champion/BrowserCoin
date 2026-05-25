@@ -103,7 +103,10 @@ export function mountMiner(host: HTMLElement, node: Node): () => void {
       <div data-w="diagIdle" class="text-sm muted">Start mining to see live diagnostics.</div>
       <div data-w="diagBody" hidden>
         <div class="conn-strip" data-w="diagBanner" hidden style="margin-bottom:12px;"></div>
-        <div class="label-caps" style="margin-bottom:6px;">Workers</div>
+        <div class="row" style="justify-content:space-between; align-items:center; margin-bottom:6px;">
+          <span class="label-caps">Workers</span>
+          <button class="ghost small" data-w="diagRestart">Restart workers</button>
+        </div>
         <div data-w="diagWorkers" style="display:grid; gap:4px; margin-bottom:14px;"></div>
         <div class="grid grid-2">
           <div class="stat-tile">
@@ -179,7 +182,14 @@ export function mountMiner(host: HTMLElement, node: Node): () => void {
   const diagIdle = view.querySelector<HTMLElement>('[data-w="diagIdle"]')!;
   const diagBody = view.querySelector<HTMLElement>('[data-w="diagBody"]')!;
   const diagBanner = view.querySelector<HTMLElement>('[data-w="diagBanner"]')!;
+  const diagRestartBtn = view.querySelector<HTMLButtonElement>('[data-w="diagRestart"]')!;
   const diagWorkers = view.querySelector<HTMLElement>('[data-w="diagWorkers"]')!;
+
+  diagRestartBtn.addEventListener('click', () => {
+    node.miner.restartWorkers();
+    diagRestartBtn.textContent = 'Restarted ✓';
+    setTimeout(() => (diagRestartBtn.textContent = 'Restart workers'), 1200);
+  });
   const diagElapsed = view.querySelector<HTMLElement>('[data-w="diagElapsed"]')!;
   const diagAttempts = view.querySelector<HTMLElement>('[data-w="diagAttempts"]')!;
   const diagAttemptHashes = view.querySelector<HTMLElement>('[data-w="diagAttemptHashes"]')!;
@@ -346,12 +356,27 @@ export function mountMiner(host: HTMLElement, node: Node): () => void {
       `${formatHashNumber(avg)} ${formatHashUnit(avg)} / ${formatHashNumber(s.hashesPerSecond)} ${formatHashUnit(s.hashesPerSecond)}`;
     diagAvgRateSub.textContent = `total ${formatBig(BigInt(Math.max(0, Math.floor(s.totalHashes))))} hashes this session`;
 
+    // Count stale workers and surface oversubscription separately from a
+    // single dead worker — Argon2id is memory-bandwidth bound, and 8+ stalls
+    // out of 11 means the thread count is fighting itself rather than one
+    // worker being unhappy.
+    let staleCount = 0;
+    for (let i = 0; i < rates.length; i++) {
+      const since = now - (lastAt[i] ?? now);
+      if (since > STALE_MS && since > WARMUP_MS) staleCount++;
+    }
+
     // Soft-hint banner. Highest-severity first; only one shown at a time.
     let hint: { cls: string; html: string } | null = null;
-    if (firstStaleIdx >= 0) {
+    if (staleCount >= 2 && staleCount >= rates.length / 2) {
       hint = {
         cls: 'conn-strip bad',
-        html: `<span class="dot"></span> Worker #${firstStaleIdx + 1} hasn't reported in ${staleAgeSec}s — likely stalled. Try <b>Stop</b> then <b>Start</b>.`,
+        html: `<span class="dot"></span> ${staleCount} of ${rates.length} workers stalled — likely too many threads for your memory bandwidth. The controller is auto-respawning them; <b>lowering the threads slider to ~${Math.max(2, Math.floor(rates.length / 2))}</b> usually mines faster on memory-bound PoW.`,
+      };
+    } else if (firstStaleIdx >= 0) {
+      hint = {
+        cls: 'conn-strip bad',
+        html: `<span class="dot"></span> Worker #${firstStaleIdx + 1} hasn't reported in ${staleAgeSec}s — the controller will auto-respawn it. If this repeats, try <b>Restart workers</b> or lower the threads count.`,
       };
     } else if (pFound > 0.95 && expectedNum > 0 && s.hashesPerSecond > 0) {
       const meanSec = expectedNum / s.hashesPerSecond;

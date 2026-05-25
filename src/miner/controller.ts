@@ -78,6 +78,19 @@ export class MinerController {
    */
   private canStart: (() => string | null) | null = null;
 
+  /** Background tick that keeps `hashesPerSecond` honest while workers report
+   *  independently, and auto-respawns workers that have gone silent. */
+  private healthTimer: ReturnType<typeof setInterval> | null = null;
+
+  /** A worker counts as stalled (and gets respawned) after this many ms with
+   *  no hashrate report. Argon2id at 32 MB / 1 iter takes ~40-125 ms, so 30 s
+   *  is roughly 250x the expected per-hash latency — only a true stall hits
+   *  this. */
+  private static readonly STALE_RESPAWN_MS = 30_000;
+  /** Hashrates older than this are dropped from the aggregate `hashesPerSecond`
+   *  so the displayed live H/s doesn't count frozen reports from dead workers. */
+  private static readonly STALE_RATE_MS = 10_000;
+
   constructor(
     private chain: Blockchain,
     private mempool: Mempool,
@@ -127,17 +140,29 @@ export class MinerController {
     this.status.attemptStartedAt = null;
     this.spawnWorkers();
     this.restartTemplate();
+    this.startHealthTimer();
     this.emit();
   }
 
   stop(): void {
     this.status.running = false;
+    this.stopHealthTimer();
     this.terminateWorkers();
     this.status.hashesPerSecond = 0;
     this.status.attemptStartedAt = null;
     this.status.workerHashrates = [];
     this.status.workerLastReportAt = [];
     this.emit();
+  }
+
+  /** Kill every worker and respawn them at the current count. The user hits
+   *  this via the "Restart workers" diagnostics button when something looks
+   *  wrong but they don't want to fully Stop + Start (which would also clear
+   *  the session counters). Internally also used by the auto-respawn path. */
+  restartWorkers(): void {
+    if (!this.status.running) return;
+    this.spawnWorkers();
+    this.restartTemplate();
   }
 
   /** Call when the chain tip or mempool changes — rebuilds the template against fresh state. */
@@ -157,6 +182,71 @@ export class MinerController {
   private emit(): void {
     const snap = this.getStatus();
     for (const fn of this.statusListeners) fn(snap);
+  }
+
+  /** Recompute the aggregate hashrate from per-worker rates, dropping anyone
+   *  whose last report is older than `STALE_RATE_MS`. Without this, the live
+   *  H/s number would keep summing frozen rates from workers that have stopped
+   *  doing work — exactly the "live 72 H/s but only 26 H/s actually done"
+   *  symptom. */
+  private recomputeHashrate(now: number): void {
+    let total = 0;
+    for (let i = 0; i < this.workerHashrates.length; i++) {
+      const age = now - (this.workerLastReportAt[i] ?? now);
+      if (age < MinerController.STALE_RATE_MS) total += this.workerHashrates[i] ?? 0;
+    }
+    this.status.hashesPerSecond = total;
+  }
+
+  /** Replace a single worker in place — used when one has gone silent so we
+   *  don't have to nuke healthy siblings. The replacement gets handed the
+   *  current template via `restartTemplate()`. */
+  private respawnWorker(idx: number): void {
+    if (idx < 0 || idx >= this.workers.length) return;
+    const old = this.workers[idx]!;
+    try { old.postMessage({ type: 'stop' }); } catch { /* worker already gone */ }
+    old.terminate();
+    const fresh = new Worker(
+      new URL('./miner.worker.ts', import.meta.url),
+      { type: 'module' },
+    );
+    fresh.onmessage = (e: MessageEvent<WorkerOut>) => this.onWorker(idx, e.data);
+    this.workers[idx] = fresh;
+    const now = performance.now();
+    this.workerHashrates[idx] = 0;
+    this.workerLastReportAt[idx] = now;
+    this.status.workerHashrates = this.workerHashrates.slice();
+    this.status.workerLastReportAt = this.workerLastReportAt.slice();
+    this.restartTemplate();
+  }
+
+  private startHealthTimer(): void {
+    if (this.healthTimer !== null) return;
+    this.healthTimer = setInterval(() => {
+      if (!this.status.running) return;
+      const now = performance.now();
+      // 1. Refresh the live hashrate so stale rates fall off even when no
+      //    worker is reporting.
+      this.recomputeHashrate(now);
+      // 2. Auto-respawn any worker that's been silent past the threshold.
+      //    Argon2id is memory-bandwidth bound, so 11+ workers on a typical
+      //    laptop can deadlock a chunk of them — surgically replacing the
+      //    dead ones avoids disrupting the live ones.
+      for (let i = 0; i < this.workers.length; i++) {
+        const age = now - (this.workerLastReportAt[i] ?? now);
+        if (age > MinerController.STALE_RESPAWN_MS) {
+          console.warn(`[miner] worker #${i + 1} silent for ${Math.round(age / 1000)}s — respawning`);
+          this.respawnWorker(i);
+        }
+      }
+      this.emit();
+    }, 1000);
+  }
+
+  private stopHealthTimer(): void {
+    if (this.healthTimer === null) return;
+    clearInterval(this.healthTimer);
+    this.healthTimer = null;
   }
 
   private spawnWorkers(): void {
@@ -190,11 +280,11 @@ export class MinerController {
   private onWorker(idx: number, msg: WorkerOut): void {
     if (msg.type === 'hashrate') {
       if (idx < this.workerHashrates.length) {
+        const now = performance.now();
         this.workerHashrates[idx] = msg.hashesPerSecond;
-        this.workerLastReportAt[idx] = performance.now();
-        this.status.hashesPerSecond =
-          this.workerHashrates.reduce((a, b) => a + b, 0);
+        this.workerLastReportAt[idx] = now;
         this.status.totalHashes += msg.deltaHashes;
+        this.recomputeHashrate(now);
         this.status.workerHashrates = this.workerHashrates.slice();
         this.status.workerLastReportAt = this.workerLastReportAt.slice();
         this.emit();
