@@ -30,6 +30,18 @@ import {
  */
 export const CHAIN_VERSION = 'browsercoin-pow-v5';
 
+/**
+ * Show the sync overlay only when we're this many blocks behind a known tip.
+ * Smaller backlogs verify in well under a second, so we let them happen in the
+ * background with no overlay. A bigger gap means we either hit the startup race
+ * (heartbeat marked a server reachable before its /tip arrived) or have been
+ * idle long enough that surfacing progress is worthwhile. Keeping readiness
+ * keyed on backlog size — not on a server confirming we're caught up — is what
+ * keeps helper servers strictly helpers: a peer's reported height feeds the
+ * same comparison, and if nobody answers we never declare ourselves behind.
+ */
+const SYNC_BACKLOG_BLOCKS = 50;
+
 type ChainListener = () => void;
 
 /** Detail of a locally-mined block — what the UI's "you found a block!" toast needs. */
@@ -262,7 +274,12 @@ export class Node {
       const ss = this.serverSync?.getStatus();
       const ns = this.network?.getStatus();
       const connected = (ss?.reachable ?? 0) > 0 || (ns?.connected ?? 0) > 0;
+      // Always offer an escape after the timeout so the user is never trapped.
+      // Label it 'offline' only when truly unreachable; a reachable-but-not-yet-
+      // caught-up server (e.g. heartbeats work but /tip keeps failing) keeps its
+      // current phase but still gets a dismiss button.
       if (!connected) this.emitSync({ phase: 'offline', canDismiss: true });
+      else this.emitSync({ canDismiss: true });
     }, 12000);
 
     // 3. P2P. Failure here is non-fatal — server sync alone is enough to be a
@@ -282,21 +299,34 @@ export class Node {
    * connectivity, we don't expose the home UI.
    */
   private updateSyncReadiness(): void {
-    if (!this.syncStatus.syncing) return;
     const ss = this.serverSync?.getStatus();
     const ns = this.network?.getStatus();
     const local = this.chain.height;
+    // Best height we've heard from ANYONE — a server's /tip or a peer's hello.
+    // No single source is authoritative; we just take the max we've been told.
+    const target = Math.max(ss?.serverHeight ?? 0, ns?.bestPeerHeight ?? 0);
+    if (target > this.syncStatus.targetHeight) this.emitSync({ targetHeight: target });
+
+    if (target - local > SYNC_BACKLOG_BLOCKS) {
+      // A real backlog to pull — (re-)show the overlay while we verify it. This
+      // is the key fix: even if we already dropped the overlay during the
+      // heartbeat-before-tip race (server marked reachable while its serverHeight
+      // was still 0), learning a far-ahead tip now puts the overlay back up.
+      this.emitSync({ syncing: true, phase: 'verifying' });
+      return;
+    }
+    if (!this.syncStatus.syncing) return; // within threshold and already dismissed
+
     const serverUp = !!ss && ss.reachable > 0;
     const peerUp = !!ns && ns.connected > 0;
-
-    if (serverUp && local >= ss!.serverHeight) {
+    // Only drop once we've actually heard a height from someone (target > 0) and
+    // we're within the trivial-backlog window. Until then keep the overlay up so
+    // we never expose a height-0 cached chain during the connect window. If no
+    // one ever answers, target stays 0 and the 12s safety net handles it.
+    if (target > 0 && (serverUp || peerUp)) {
       this.emitSync({ syncing: false, phase: 'ready' });
-    } else if (peerUp && !serverUp) {
-      // No server, but a peer is feeding us. Accept current state and let
-      // gossip catch us up afterwards.
-      this.emitSync({ syncing: false, phase: 'ready' });
-    } else if (serverUp) {
-      this.emitSync({ phase: 'verifying' });
+    } else if (serverUp || peerUp) {
+      this.emitSync({ phase: 'fetching' });
     } else {
       this.emitSync({ phase: 'connecting' });
     }

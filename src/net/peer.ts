@@ -59,6 +59,12 @@ export interface PeerStatus {
   myId: string | null;
   /** Count of direct WebRTC connections currently established. */
   connected: number;
+  /**
+   * Highest chain height any connected peer has told us about via `hello`.
+   * Lets a server-less tab gauge how far behind it is (and whether to show the
+   * sync overlay) without consulting a helper server's /tip.
+   */
+  bestPeerHeight: number;
   serverPeerCount: number;
   /** Active miners across the network as last reported by helper servers. */
   serverMinersActive: number;
@@ -140,6 +146,7 @@ export class PeerNetwork {
     this.status = {
       myId: null,
       connected: 0,
+      bestPeerHeight: 0,
       serverPeerCount: 0,
       serverMinersActive: 0,
       signalingServers: signalingServers.map((url) => ({ url, open: false })),
@@ -513,6 +520,12 @@ export class PeerNetwork {
           if (msg.chainId !== CHAIN_ID) {
             conn.close();
             return;
+          }
+          // Record the peer's height so a server-less node can tell how far
+          // behind it is (drives the sync overlay) without asking a server.
+          if (msg.height > this.status.bestPeerHeight) {
+            this.status.bestPeerHeight = msg.height;
+            this.emit();
           }
           if (msg.height > this.chain.height && !this.chain.hasBlock(msg.tipHash)) {
             // If the peer is more than one block ahead, prefer a range pull —
