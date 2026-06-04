@@ -129,6 +129,24 @@ export class PeerNetwork {
   private candidatePool = new Set<string>();
   /** IDs we've already tried this session — avoid dialing the same dead peer in a loop. */
   private dialedThisSession = new Set<string>();
+  /**
+   * Outbound dials that have neither opened nor failed yet. Counted toward
+   * MAX_PEERS alongside `connections` so a single dial pass — and successive
+   * heartbeat passes — never exceed the cap while handshakes are still in
+   * flight. Without this, `connections` only grows in the async `open`
+   * callback, so the synchronous dial loop sees size 0 and dials the entire
+   * candidate pool at once (Chrome then throws "Cannot create so many
+   * PeerConnections").
+   */
+  private dialing = new Set<string>();
+  /**
+   * Per-dial watchdog timers. `peer-unavailable` fires on the *Peer* object,
+   * not the DataConnection, so `conn.on('error')` never runs for the common
+   * "dead ID" case — without a timeout the slot in `dialing` would leak
+   * forever and starve us down to zero dials. The timer guarantees the slot
+   * is freed; `open`/`close`/`error` clear it early when they do fire.
+   */
+  private dialTimers = new Map<string, ReturnType<typeof setTimeout>>();
   /** Notified whenever a peer ID is observed (live or learned) so Node can persist it. */
   private peerSeenListeners = new Set<(id: string) => void>();
 
@@ -295,6 +313,14 @@ export class PeerNetwork {
       });
       peer.on('error', (err) => {
         console.warn('[peer]', signalingUrl, 'error', err.type, err.message);
+        // `peer-unavailable` fires here (on the Peer, not the DataConnection)
+        // and names the dead ID in its message. Free its dial slot right away
+        // instead of waiting out the watchdog, so a stale-heavy candidate pool
+        // churns at full width rather than 8-every-DIAL_TIMEOUT_MS.
+        if (err.type === 'peer-unavailable') {
+          const deadId = err.message.split(' ').pop();
+          if (deadId && deadId.startsWith(PEER_PREFIX)) this.releaseDial(deadId);
+        }
         if (!opened) {
           this.markSignalingOpen(signalingUrl, false);
           reject(err);
@@ -323,6 +349,9 @@ export class PeerNetwork {
     for (const c of this.connections.values()) c.close();
     this.connections.clear();
     this.lastSeen.clear();
+    for (const t of this.dialTimers.values()) clearTimeout(t);
+    this.dialTimers.clear();
+    this.dialing.clear();
     for (const peer of this.peers.values()) {
       try { peer.destroy(); } catch { /* ignore */ }
     }
@@ -450,15 +479,39 @@ export class PeerNetwork {
     const origin = this.anyOpenPeer();
     if (!origin) return; // no signaling open right now; try again next heartbeat
     for (const id of fresh) {
-      if (this.connections.size >= MAX_PEERS) break;
+      // Count in-flight dials, not just opened connections — see `dialing`.
+      if (this.connections.size + this.dialing.size >= MAX_PEERS) break;
       this.dialedThisSession.add(id);
+      this.beginDial(id);
       const conn = origin.connect(id, { reliable: true });
       this.adoptConnection(conn);
     }
   }
 
+  /** Reserve a MAX_PEERS slot for an outbound dial and arm its watchdog. */
+  private beginDial(id: string): void {
+    this.dialing.add(id);
+    this.dialTimers.set(
+      id,
+      setTimeout(() => this.releaseDial(id), DIAL_TIMEOUT_MS),
+    );
+  }
+
+  /** Free a dial's slot and cancel its watchdog. Idempotent; safe for IDs
+   *  that were never dialed (inbound / targeted connections call this too). */
+  private releaseDial(id: string): void {
+    this.dialing.delete(id);
+    const t = this.dialTimers.get(id);
+    if (t !== undefined) {
+      clearTimeout(t);
+      this.dialTimers.delete(id);
+    }
+  }
+
   private adoptConnection(conn: DataConnection): void {
     conn.on('open', () => {
+      // Handshake resolved — release the dial slot (no-op for inbound conns).
+      this.releaseDial(conn.peer);
       // Dedup: a remote peer might reach us via two different signaling
       // servers in quick succession. Keep the first; close the rest.
       const existing = this.connections.get(conn.peer);
@@ -494,6 +547,8 @@ export class PeerNetwork {
     });
     conn.on('data', (data) => this.onIncoming(conn, data as ProtoMsg));
     conn.on('close', () => {
+      // Free the dial slot whether or not the conn ever reached `open`.
+      this.releaseDial(conn.peer);
       // Only remove if this exact DataConnection is the one we have stored
       // (might already have been replaced by a dedup race).
       if (this.connections.get(conn.peer) === conn) {
@@ -504,6 +559,7 @@ export class PeerNetwork {
       }
     });
     conn.on('error', (e) => {
+      this.releaseDial(conn.peer);
       console.warn('[peer] conn error', conn.peer, e.message);
     });
   }
