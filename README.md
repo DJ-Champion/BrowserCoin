@@ -76,6 +76,34 @@ The two helpers run as independent processes — kill one and the other keeps wo
 | `npm test` | Run vitest unit tests |
 | `npm run server:api` | HTTP API helper (chain backup, `/peers`, `/heartbeat`, `/tip`, …) |
 | `npm run server:peerjs` | WebRTC signaling helper (`/peerjs` WebSocket) |
+| `npm run miner:benchmark` | Benchmark the external TypeScript miner |
+| `npm run miner:mine` | Run the external reward-only TypeScript miner |
+| `npm run miner:check` | Start a temporary helper and verify one external-mined block |
+| `npm run miner:mainnet-check` | Read-only sanity check against live helper APIs |
+
+## External miner
+
+BrowserCoin also ships a correctness-first Node/TypeScript external miner. It reuses the same consensus, state, encoding, target, and Argon2id PoW modules as the browser client.
+
+```bash
+# benchmark local hashrate; includes a short warm-up before measuring
+npm run miner:benchmark -- --workers 4 --duration 30
+
+# mine one reward-only block against a local helper
+npm run server:api
+npm run miner:mine -- --once --api http://localhost:9000 --workers 1
+
+# opt in to helper mempool transaction inclusion
+npm run miner:mine -- --api http://localhost:9000 --workers 4 --txs
+
+# run a self-contained live check on a temporary helper port
+npm run miner:check
+
+# read-only check against the configured production helper APIs
+npm run miner:mainnet-check
+```
+
+The v1 external miner is intentionally boring: HTTP helper only and WASM Argon2id backend only. It mines reward-only blocks by default; `--txs` opts into helper mempool transaction inclusion through the existing `Mempool.selectForBlock` path. It writes `miner-wallet.json` by default and never overwrites an existing wallet.
 
 ## Project layout
 
@@ -88,6 +116,7 @@ src/
   chain/          block, tx, state, mempool, blockchain, consensus, genesis
   storage/        IndexedDB + localStorage wallet + migration
   miner/          Web Worker nonce grinder + throttle slider
+  external-miner/ Node/TypeScript external miner
   net/            PeerJS gossip protocol + multi-server fan-out + sync
   ui/             vanilla-TS UI views + hash router + info-popovers
   util/           binary / merkle helpers

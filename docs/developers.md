@@ -15,7 +15,7 @@ How to read, write, and integrate against a BrowserCoin chain. The HTTP helper s
 | Initial block reward | 50 BRC, halved every 210 000 blocks | `src/chain/genesis.ts` |
 | Max block size | 256 KB | `src/chain/genesis.ts` (`MAX_BLOCK_BYTES`) |
 | Min fee | 1 wei per byte (≥ 152 wei per tx) | `src/chain/genesis.ts` (`MIN_FEE_PER_BYTE`) |
-| Future-time reject | > 30 min ahead of helper clock | `src/chain/genesis.ts` (`MAX_FUTURE_TIME_S`) |
+| Future-time reject | > 10 min ahead of helper clock | `src/chain/genesis.ts` (`MAX_FUTURE_TIME_S`) |
 | Default helper port | `9000` (API), `9001` (PeerJS signaling) | `server/api.ts`, `server/peerjs.ts` |
 
 All integers on the wire are **big-endian**.
@@ -185,7 +185,7 @@ A block is `148 + 4 + 152·N` bytes: header, tx count (u32), N transactions. See
 
 **Block hash** = `sha256(header_bytes)` — header only, not the body.
 
-**Genesis** is deterministic (`GENESIS` in `src/chain/genesis.ts`): height 0, all-zero hashes/miner, `timestamp = 1700000000`, `difficulty = 0x20400000`. No txs. Independent verifiers should treat any chain whose height-0 block differs from this as a different network.
+**Genesis** is deterministic (`GENESIS` in `src/chain/genesis.ts`): height 0, all-zero hashes/miner, `timestamp = 1779700000`, `difficulty = 0x20020000`. No txs. Independent verifiers should treat any chain whose height-0 block differs from this as a different network.
 
 ## 5. Proof-of-Work
 
@@ -198,7 +198,7 @@ Memory-hard Argon2id over the 148-byte header bytes.
 | Iterations | 1 |
 | Parallelism | 1 |
 | Output length | 32 bytes |
-| Salt | UTF-8 of the literal string `browsercoin-pow-v2` |
+| Salt | UTF-8 of the literal string `browsercoin-pow-v5` |
 
 Source: `POW_PARAMS` in `src/crypto/pow.ts`.
 
@@ -275,7 +275,19 @@ Neither helper is an authority. Every block they accept is validated by the loca
 
 **Build a wallet.** Generate an Ed25519 keypair with `@noble/ed25519`. The 32-byte pubkey is your address. To send: fetch your account's current nonce (replay the chain or query an explorer you trust), build the 88-byte preimage (§3), sign, concat signature, hex-encode, `POST /txs`.
 
-**Mine externally.** Fetch the parent block, build a candidate header with your `miner` pubkey, grind `nonce` (and bump `timestamp` on u32 overflow) computing Argon2id with the params in §5 until the hash meets the target. `POST /block` to submit.
+**Mine externally.** Use the built-in TypeScript reference miner for reward-only HTTP-helper mining:
+
+```bash
+npm run miner:benchmark -- --workers 4 --duration 30
+npm run miner:mine -- --once --api http://localhost:9000 --workers 1
+npm run miner:mine -- --api http://localhost:9000 --workers 4 --txs
+npm run miner:check
+npm run miner:mainnet-check
+```
+
+The reference miner lives in `src/external-miner/` and intentionally imports the existing consensus helpers instead of reimplementing them: `encodeHeader`, `encodeBlock`, `decodeBlock`, `computeTxRoot`, `nextDifficulty`, `applyBlockTxs`, `stateRoot`, `compactToTarget`, `hashMeetsTarget`, and `powHash`. It mines reward-only blocks by default; `--txs` opts into helper mempool transaction inclusion through the same `Mempool.add` and `Mempool.selectForBlock` logic used by the browser miner. WebRTC mining and Rust/native backends are future extensions.
+
+If you are writing your own miner, fetch the parent block, build a candidate header with your `miner` pubkey, grind `nonce` computing Argon2id with the params in §5 until the hash meets the target, then `POST /block` to submit. Keep block IDs separate from PoW hashes: block IDs are `sha256(header_bytes)`, while PoW uses Argon2id over the same 148-byte header.
 
 **Run a stats bot.** Just `GET /stats` on an interval.
 
@@ -283,5 +295,5 @@ Neither helper is an authority. Every block they accept is validated by the loca
 
 - This is v0.2. Expect breakage. There is no API versioning header.
 - The CHAIN_ID is the only fork-resistant identifier — any cross-network reuse is rejected at signature-verify time.
-- Memory-hard PoW parameters (`POW_PARAMS.salt`) include a `-v2` suffix so a future hard fork can bump to `-v3` and cleanly invalidate the old chain.
+- Memory-hard PoW parameters (`POW_PARAMS.salt`) include a `-v5` suffix so a future hard fork can bump it again and cleanly invalidate the old chain.
 - Helper URLs and peer IDs change. Don't hardcode them — load from the app's Settings or run your own.

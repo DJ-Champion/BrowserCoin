@@ -9,6 +9,11 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "test": "vitest run",
+    "miner": "tsx src/cli/miner.ts",
+    "miner:benchmark": "tsx src/cli/miner.ts benchmark",
+    "miner:mine": "tsx src/cli/miner.ts mine",
+    "miner:check": "tsx scripts/check-external-miner.ts",
+    "miner:mainnet-check": "tsx scripts/check-mainnet.ts",
     "test:watch": "vitest",
     "server:api": "tsx server/api.ts --port 9000",
     "server:peerjs": "tsx server/peerjs.ts --port 9001"
