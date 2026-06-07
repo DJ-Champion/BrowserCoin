@@ -9,6 +9,7 @@ const root = process.cwd();
 const walletPath = path.join(root, `.miner-check-wallet-${port}.json`);
 const chainPath = path.join(root, 'server', `chain-${port}.json`);
 const backupPath = path.join(root, 'server', `backups-${port}`);
+const extraMinerArgs = process.argv.slice(2);
 
 async function main(): Promise<void> {
   await assertPathAbsent(chainPath);
@@ -36,6 +37,7 @@ async function main(): Promise<void> {
       walletPath,
       '--stats-interval',
       '1',
+      ...extraMinerArgs,
     ]);
     const minerOutput = await collect(miner, 120_000);
     if (!minerOutput.includes('accepted height=')) {

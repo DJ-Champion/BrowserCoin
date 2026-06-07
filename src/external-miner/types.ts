@@ -1,6 +1,7 @@
 import type { Block } from '../chain/block.js';
 
 export type MinerCommand = 'benchmark' | 'mine';
+export type MiningBackend = 'wasm' | 'rust';
 export type LogLevel = 'info' | 'debug' | 'quiet';
 export type WorkerCountOption = number | 'auto';
 
@@ -13,6 +14,8 @@ export interface MinerConfig {
   resyncIntervalSec: number;
   once: boolean;
   includeTxs: boolean;
+  backend: MiningBackend;
+  rustCorePath: string | null;
   logLevel: LogLevel;
   durationSec: number;
   warmupSec: number;

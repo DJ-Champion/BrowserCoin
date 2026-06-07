@@ -1,6 +1,6 @@
 import os from 'node:os';
 import path from 'node:path';
-import type { LogLevel, MinerCommand, MinerConfig, WorkerCountOption } from './types.js';
+import type { LogLevel, MinerCommand, MinerConfig, MiningBackend, WorkerCountOption } from './types.js';
 
 const DEFAULT_API = 'http://localhost:9000';
 const DEFAULT_STATS_INTERVAL_SEC = 5;
@@ -24,6 +24,8 @@ export function parseMinerConfig(argv: string[]): MinerConfig {
     resyncIntervalSec: DEFAULT_RESYNC_INTERVAL_SEC,
     once: false,
     includeTxs: false,
+    backend: 'wasm',
+    rustCorePath: null,
     logLevel: 'info',
     durationSec: DEFAULT_BENCHMARK_DURATION_SEC,
     warmupSec: DEFAULT_BENCHMARK_WARMUP_SEC,
@@ -66,10 +68,12 @@ export function parseMinerConfig(argv: string[]): MinerConfig {
         config.logLevel = parseLogLevel(requireValue(args, ++i, arg));
         break;
       case '--backend': {
-        const backend = requireValue(args, ++i, arg);
-        if (backend !== 'wasm') throw new Error('only --backend wasm is supported in v1');
+        config.backend = parseBackend(requireValue(args, ++i, arg));
         break;
       }
+      case '--rust-core':
+        config.rustCorePath = path.resolve(requireValue(args, ++i, arg));
+        break;
       case '--help':
       case '-h':
         throw new Error(usage());
@@ -102,6 +106,8 @@ export function usage(): string {
     '  --once                   Mine one accepted block then exit',
     '  --txs                    Include mineable helper mempool transactions',
     '  --no-txs                 Mine reward-only blocks (default)',
+    '  --backend <wasm|rust>    Mining backend (default: wasm)',
+    '  --rust-core <path>       Rust core executable path; defaults to cargo run fallback',
     '  --log-level <level>      info, debug, or quiet',
   ].join('\n');
 }
@@ -133,6 +139,11 @@ function parseNonNegativeNumber(value: string, flag: string): number {
 function parseLogLevel(value: string): LogLevel {
   if (value === 'info' || value === 'debug' || value === 'quiet') return value;
   throw new Error('--log-level must be info, debug, or quiet');
+}
+
+function parseBackend(value: string): MiningBackend {
+  if (value === 'wasm' || value === 'rust') return value;
+  throw new Error('--backend must be wasm or rust');
 }
 
 function requireValue(args: string[], index: number, flag: string): string {

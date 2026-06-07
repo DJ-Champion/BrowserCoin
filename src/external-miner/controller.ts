@@ -1,4 +1,5 @@
 import { Worker } from 'node:worker_threads';
+import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
 import { encodeBlock, type Block } from '../chain/block.js';
 import { Mempool } from '../chain/mempool.js';
@@ -17,10 +18,17 @@ interface ManagedWorker {
   id: number;
 }
 
+type RustOut =
+  | { type: 'stats'; hashes: number; elapsedMs: number; hashesPerSecond: number }
+  | { type: 'solved'; nonce: number; hash: string; header: string }
+  | { type: 'exhausted' };
+
 export class ExternalMinerController {
   private client: HelperClient;
   private sync: ChainSync;
   private workers: ManagedWorker[] = [];
+  private rustProcess: ChildProcessWithoutNullStreams | null = null;
+  private rustLineBuffer = '';
   private generation = 0;
   private running = false;
   private template: RewardOnlyTemplate | null = null;
@@ -80,6 +88,7 @@ export class ExternalMinerController {
 
   private spawnWorkers(): void {
     this.stopWorkers();
+    if (this.config.backend === 'rust') return;
     const count = resolvedWorkerCount(this.config.workers);
     for (let i = 0; i < count; i++) {
       const worker = new Worker(new URL('./worker.ts', import.meta.url), {
@@ -97,6 +106,11 @@ export class ExternalMinerController {
 
   private stopWorkers(): void {
     this.generation++;
+    if (this.rustProcess) {
+      this.rustProcess.kill();
+      this.rustProcess = null;
+      this.rustLineBuffer = '';
+    }
     for (const entry of this.workers) {
       entry.worker.postMessage({ type: 'stop', generation: this.generation } satisfies WorkerIn);
       entry.worker.terminate();
@@ -114,7 +128,12 @@ export class ExternalMinerController {
   private startWorkers(template: RewardOnlyTemplate, reportEveryMs = Math.max(1000, this.config.statsIntervalSec * 1000)): void {
     this.generation++;
     const generation = this.generation;
-    const count = Math.max(1, this.workers.length);
+    const count = this.workerCountForDisplay();
+    if (this.config.backend === 'rust') {
+      this.startRust(template, generation, reportEveryMs);
+      this.log('info', `mining height=${template.block.header.height} workers=${count} backend=rust difficulty=${template.block.header.difficulty.toString(16)}`);
+      return;
+    }
     for (const entry of this.workers) {
       entry.worker.postMessage({
         type: 'start',
@@ -126,18 +145,112 @@ export class ExternalMinerController {
         reportEveryMs,
       } satisfies WorkerIn);
     }
-    this.log('info', `mining height=${template.block.header.height} workers=${count} difficulty=${template.block.header.difficulty.toString(16)}`);
+    this.log('info', `mining height=${template.block.header.height} workers=${count} backend=wasm difficulty=${template.block.header.difficulty.toString(16)}`);
   }
 
   private async restartTemplate(): Promise<void> {
     if (!this.running) return;
     this.generation++;
+    if (this.rustProcess) {
+      this.rustProcess.kill();
+      this.rustProcess = null;
+      this.rustLineBuffer = '';
+    }
     for (const entry of this.workers) {
       entry.worker.postMessage({ type: 'stop', generation: this.generation } satisfies WorkerIn);
     }
     await this.sync.syncToHelper();
     this.lastTipHash = bytesToHex(this.sync.chain.tip.hash);
     await this.startTemplate();
+  }
+
+  private startRust(template: RewardOnlyTemplate, generation: number, reportEveryMs: number): void {
+    if (this.rustProcess) this.rustProcess.kill();
+    this.rustLineBuffer = '';
+    const headerHex = bytesToHex(template.headerBytes);
+    const statsInterval = Math.max(0.001, reportEveryMs / 1000);
+    const coreArgs = [
+      'mine',
+      '--header',
+      headerHex,
+      '--target',
+      template.targetHex,
+      '--workers',
+      String(resolvedWorkerCount(this.config.workers)),
+      '--stats-interval',
+      String(statsInterval),
+    ];
+    const child = this.spawnRustCore(coreArgs);
+    this.rustProcess = child;
+    child.stdout.on('data', (chunk: Buffer) => this.onRustStdout(generation, chunk.toString()));
+    child.stderr.on('data', (chunk: Buffer) => {
+      const text = chunk.toString().trim();
+      if (text) this.log('debug', `[rust] ${text}`);
+    });
+    child.on('error', (err) => {
+      if (generation !== this.generation) return;
+      this.log('info', `rust backend error: ${err.message}`);
+      this.stats.rejected++;
+      void this.restartTemplate();
+    });
+    child.on('exit', (code) => {
+      if (generation !== this.generation || !this.running) return;
+      if (code !== 0) {
+        this.log('info', `rust backend exited ${code}`);
+        this.stats.rejected++;
+        void this.restartTemplate();
+      }
+    });
+  }
+
+  private spawnRustCore(args: string[]): ChildProcessWithoutNullStreams {
+    if (this.config.rustCorePath) {
+      const child = spawn(this.config.rustCorePath, args, { cwd: process.cwd(), stdio: ['pipe', 'pipe', 'pipe'] });
+      child.stdin.end();
+      return child;
+    }
+    const child = spawn('cargo', ['run', '--manifest-path', 'rust-core/Cargo.toml', '--quiet', '--', ...args], {
+      cwd: process.cwd(),
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    child.stdin.end();
+    return child;
+  }
+
+  private onRustStdout(generation: number, text: string): void {
+    this.rustLineBuffer += text;
+    let nl = this.rustLineBuffer.indexOf('\n');
+    while (nl >= 0) {
+      const line = this.rustLineBuffer.slice(0, nl).trim();
+      this.rustLineBuffer = this.rustLineBuffer.slice(nl + 1);
+      if (line) void this.onRustLine(generation, line);
+      nl = this.rustLineBuffer.indexOf('\n');
+    }
+  }
+
+  private async onRustLine(generation: number, line: string): Promise<void> {
+    if (generation !== this.generation) return;
+    let msg: RustOut;
+    try {
+      msg = JSON.parse(line) as RustOut;
+    } catch {
+      this.log('debug', `[rust] ${line}`);
+      return;
+    }
+    if (msg.type === 'stats') {
+      this.stats.totalHashes += msg.hashes;
+      this.hashWindow += msg.hashes;
+      this.maybePrintStats();
+      return;
+    }
+    if (msg.type === 'exhausted') {
+      this.stats.stale++;
+      await this.restartTemplate();
+      return;
+    }
+    if (msg.type === 'solved') {
+      await this.submitSolution(msg.nonce);
+    }
   }
 
   private async fetchMineableTxs(): Promise<Transaction[]> {
@@ -196,6 +309,11 @@ export class ExternalMinerController {
     const template = this.template;
     if (!template || !this.running) return;
     this.generation++;
+    if (this.rustProcess) {
+      this.rustProcess.kill();
+      this.rustProcess = null;
+      this.rustLineBuffer = '';
+    }
     for (const entry of this.workers) {
       entry.worker.postMessage({ type: 'stop', generation: this.generation } satisfies WorkerIn);
     }
@@ -256,12 +374,17 @@ export class ExternalMinerController {
   private printStats(final: boolean): void {
     if (this.config.logLevel === 'quiet') return;
     if (final) this.updateHashrate();
-    const prefix = final ? 'final' : 'stats';
+      const prefix = final ? 'final' : 'stats';
     console.log(
-      `${prefix} height=${this.stats.candidateHeight} workers=${this.workers.length} ` +
+      `${prefix} height=${this.stats.candidateHeight} workers=${this.workerCountForDisplay()} ` +
+        `backend=${this.config.backend} ` +
         `hashrate=${this.stats.hashesPerSecond.toFixed(2)}H/s total=${this.stats.totalHashes} ` +
         `accepted=${this.stats.accepted} rejected=${this.stats.rejected} stale=${this.stats.stale}`,
     );
+  }
+
+  private workerCountForDisplay(): number {
+    return this.config.backend === 'rust' ? resolvedWorkerCount(this.config.workers) : this.workers.length;
   }
 
   private resetHashStats(): void {

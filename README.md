@@ -105,11 +105,16 @@ npm run miner:mainnet-check
 
 # verify the optional Rust PoW core against TypeScript
 npm run rust-core:check
+
+# use the Rust nonce-grinding backend after building it
+npm run rust-core:build:release
+npm run miner:benchmark -- --backend rust --rust-core ./rust-core/target/release/browsercoin-rust-core --workers 4
+npm run miner:mine -- --backend rust --rust-core ./rust-core/target/release/browsercoin-rust-core --api http://localhost:9000
 ```
 
-The v1 external miner is intentionally boring: HTTP helper only and WASM Argon2id backend only. It mines reward-only blocks by default; `--txs` opts into helper mempool transaction inclusion through the existing `Mempool.selectForBlock` path. It writes `miner-wallet.json` by default and never overwrites an existing wallet.
+The v1 external miner is intentionally boring: HTTP helper only, TypeScript orchestration, and reward-only blocks by default. `--txs` opts into helper mempool transaction inclusion through the existing `Mempool.selectForBlock` path. It writes `miner-wallet.json` by default and never overwrites an existing wallet.
 
-An optional Rust prototype lives in `rust-core/`. It is a standalone executable for the hot PoW path, not a Node native addon. TypeScript remains the source of truth for chain sync, template construction, CLI handling, and submission.
+An optional Rust prototype lives in `rust-core/`. It is a standalone executable for the hot PoW path, not a Node native addon. TypeScript remains the source of truth for chain sync, template construction, CLI handling, and submission. Omit `--rust-core` to use the development `cargo run` fallback; pass a release binary path for real benchmarking.
 
 ## Project layout
 

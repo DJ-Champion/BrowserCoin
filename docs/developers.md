@@ -284,6 +284,8 @@ npm run miner:mine -- --api http://localhost:9000 --workers 4 --txs
 npm run miner:check
 npm run miner:mainnet-check
 npm run rust-core:check
+npm run rust-core:build:release
+npm run miner:mine -- --backend rust --rust-core ./rust-core/target/release/browsercoin-rust-core --api http://localhost:9000
 ```
 
 The reference miner lives in `src/external-miner/` and intentionally imports the existing consensus helpers instead of reimplementing them: `encodeHeader`, `encodeBlock`, `decodeBlock`, `computeTxRoot`, `nextDifficulty`, `applyBlockTxs`, `stateRoot`, `compactToTarget`, `hashMeetsTarget`, and `powHash`. It mines reward-only blocks by default; `--txs` opts into helper mempool transaction inclusion through the same `Mempool.add` and `Mempool.selectForBlock` logic used by the browser miner. WebRTC mining and TypeScript orchestration of the Rust backend are future extensions.
