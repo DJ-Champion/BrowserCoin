@@ -8,5 +8,6 @@ dist
 server/dist
 server/chain.json
 server/backups-*/
+rust-core/target
 .claude
 *.stackdump

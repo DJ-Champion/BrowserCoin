@@ -283,9 +283,12 @@ npm run miner:mine -- --once --api http://localhost:9000 --workers 1
 npm run miner:mine -- --api http://localhost:9000 --workers 4 --txs
 npm run miner:check
 npm run miner:mainnet-check
+npm run rust-core:check
 ```
 
-The reference miner lives in `src/external-miner/` and intentionally imports the existing consensus helpers instead of reimplementing them: `encodeHeader`, `encodeBlock`, `decodeBlock`, `computeTxRoot`, `nextDifficulty`, `applyBlockTxs`, `stateRoot`, `compactToTarget`, `hashMeetsTarget`, and `powHash`. It mines reward-only blocks by default; `--txs` opts into helper mempool transaction inclusion through the same `Mempool.add` and `Mempool.selectForBlock` logic used by the browser miner. WebRTC mining and Rust/native backends are future extensions.
+The reference miner lives in `src/external-miner/` and intentionally imports the existing consensus helpers instead of reimplementing them: `encodeHeader`, `encodeBlock`, `decodeBlock`, `computeTxRoot`, `nextDifficulty`, `applyBlockTxs`, `stateRoot`, `compactToTarget`, `hashMeetsTarget`, and `powHash`. It mines reward-only blocks by default; `--txs` opts into helper mempool transaction inclusion through the same `Mempool.add` and `Mempool.selectForBlock` logic used by the browser miner. WebRTC mining and TypeScript orchestration of the Rust backend are future extensions.
+
+The optional Rust prototype in `rust-core/` is a standalone executable for the hot PoW path. It supports `hash --header <hex>` for compatibility checks and `mine --header <hex> --target <hex> --workers N` for nonce grinding. It must stay byte-for-byte compatible with TypeScript `powHash`; run `npm run rust-core:check` after changes.
 
 If you are writing your own miner, fetch the parent block, build a candidate header with your `miner` pubkey, grind `nonce` computing Argon2id with the params in §5 until the hash meets the target, then `POST /block` to submit. Keep block IDs separate from PoW hashes: block IDs are `sha256(header_bytes)`, while PoW uses Argon2id over the same 148-byte header.
 

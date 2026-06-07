@@ -80,6 +80,7 @@ The two helpers run as independent processes — kill one and the other keeps wo
 | `npm run miner:mine` | Run the external reward-only TypeScript miner |
 | `npm run miner:check` | Start a temporary helper and verify one external-mined block |
 | `npm run miner:mainnet-check` | Read-only sanity check against live helper APIs |
+| `npm run rust-core:check` | Verify Rust Argon2id PoW matches TypeScript |
 
 ## External miner
 
@@ -101,9 +102,14 @@ npm run miner:check
 
 # read-only check against the configured production helper APIs
 npm run miner:mainnet-check
+
+# verify the optional Rust PoW core against TypeScript
+npm run rust-core:check
 ```
 
 The v1 external miner is intentionally boring: HTTP helper only and WASM Argon2id backend only. It mines reward-only blocks by default; `--txs` opts into helper mempool transaction inclusion through the existing `Mempool.selectForBlock` path. It writes `miner-wallet.json` by default and never overwrites an existing wallet.
+
+An optional Rust prototype lives in `rust-core/`. It is a standalone executable for the hot PoW path, not a Node native addon. TypeScript remains the source of truth for chain sync, template construction, CLI handling, and submission.
 
 ## Project layout
 

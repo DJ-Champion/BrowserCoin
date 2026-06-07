@@ -14,6 +14,8 @@
     "miner:mine": "tsx src/cli/miner.ts mine",
     "miner:check": "tsx scripts/check-external-miner.ts",
     "miner:mainnet-check": "tsx scripts/check-mainnet.ts",
+    "rust-core:build": "cargo build --manifest-path rust-core/Cargo.toml",
+    "rust-core:check": "tsx scripts/check-rust-core.ts",
     "test:watch": "vitest",
     "server:api": "tsx server/api.ts --port 9000",
     "server:peerjs": "tsx server/peerjs.ts --port 9001"
