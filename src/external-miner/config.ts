@@ -19,10 +19,12 @@ export function parseMinerConfig(argv: string[]): MinerConfig {
     command,
     apiUrl: DEFAULT_API,
     walletPath: path.resolve('miner-wallet.json'),
+    cachePath: path.resolve('.external-miner-chain.json'),
     workers: 'auto',
     statsIntervalSec: DEFAULT_STATS_INTERVAL_SEC,
     resyncIntervalSec: DEFAULT_RESYNC_INTERVAL_SEC,
     once: false,
+    templateOnly: false,
     includeTxs: false,
     backend: 'wasm',
     rustCorePath: null,
@@ -39,6 +41,12 @@ export function parseMinerConfig(argv: string[]): MinerConfig {
         break;
       case '--wallet':
         config.walletPath = path.resolve(requireValue(args, ++i, arg));
+        break;
+      case '--cache':
+        config.cachePath = path.resolve(requireValue(args, ++i, arg));
+        break;
+      case '--no-cache':
+        config.cachePath = null;
         break;
       case '--workers':
         config.workers = parseWorkers(requireValue(args, ++i, arg));
@@ -57,6 +65,9 @@ export function parseMinerConfig(argv: string[]): MinerConfig {
         break;
       case '--once':
         config.once = true;
+        break;
+      case '--template-only':
+        config.templateOnly = true;
         break;
       case '--txs':
         config.includeTxs = true;
@@ -98,12 +109,15 @@ export function usage(): string {
     'Options:',
     '  --api <url>              Helper API URL (default: http://localhost:9000)',
     '  --wallet <path>          Wallet JSON path (default: ./miner-wallet.json)',
+    '  --cache <path>           Chain cache path (default: ./.external-miner-chain.json)',
+    '  --no-cache               Disable external miner chain cache',
     '  --workers <n|auto>       Worker threads (default: auto)',
     '  --stats-interval <sec>   Stats print interval (default: 5)',
     '  --resync-interval <sec>  Tip polling interval (default: 5)',
     '  --duration <sec>         Benchmark duration (default: 30)',
     '  --warmup <sec>           Benchmark warm-up before measuring (default: 5)',
     '  --once                   Mine one accepted block then exit',
+    '  --template-only          Sync/build/print one candidate without mining or submitting',
     '  --txs                    Include mineable helper mempool transactions',
     '  --no-txs                 Mine reward-only blocks (default)',
     '  --backend <wasm|rust>    Mining backend (default: wasm)',

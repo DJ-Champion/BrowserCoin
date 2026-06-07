@@ -46,14 +46,25 @@ export class ExternalMinerController {
 
   constructor(private config: MinerConfig, private wallet: KeyPair) {
     this.client = new HelperClient(config.apiUrl);
-    this.sync = new ChainSync(this.client);
+    this.sync = new ChainSync(this.client, {
+      skipExpensiveValidation: true,
+      cachePath: config.cachePath,
+      onProgress: (p) => this.onSyncProgress(p.localHeight, p.targetHeight),
+    });
   }
 
   async mine(): Promise<void> {
     this.running = true;
     this.installSignalHandlers();
+    const restored = await this.sync.loadCache();
+    if (restored > 0) this.log('info', `restored ${restored} cached blocks; local=${this.sync.chain.height}`);
     await this.sync.syncToHelper();
     this.lastTipHash = bytesToHex(this.sync.chain.tip.hash);
+    if (this.config.templateOnly) {
+      await this.startTemplate();
+      this.stopWorkers();
+      return;
+    }
     this.spawnWorkers();
     await this.startTemplate();
 
@@ -122,6 +133,14 @@ export class ExternalMinerController {
     const txs = await this.fetchMineableTxs();
     this.template = buildRewardOnlyTemplate(this.sync.chain, this.wallet.publicKey, Math.floor(Date.now() / 1000), txs);
     this.stats.candidateHeight = this.template.block.header.height;
+    if (this.config.templateOnly) {
+      console.log(
+        `template height=${this.template.block.header.height} ` +
+          `difficulty=${this.template.block.header.difficulty.toString(16)} ` +
+          `txs=${this.template.block.transactions.length} target=${this.template.targetHex.slice(0, 16)}...`,
+      );
+      return;
+    }
     this.startWorkers(this.template);
   }
 
@@ -404,8 +423,8 @@ export class ExternalMinerController {
   private installSignalHandlers(): void {
     const stop = (): void => {
       this.running = false;
-      this.stopWorkers();
       this.printStats(true);
+      this.stopWorkers();
     };
     process.once('SIGINT', stop);
     process.once('SIGTERM', stop);
@@ -415,5 +434,13 @@ export class ExternalMinerController {
     if (this.config.logLevel === 'quiet') return;
     if (level === 'debug' && this.config.logLevel !== 'debug') return;
     console.log(message);
+  }
+
+  private onSyncProgress(localHeight: number, targetHeight: number): void {
+    if (this.config.logLevel === 'quiet') return;
+    if (targetHeight <= localHeight) return;
+    if (localHeight === 0 || localHeight === targetHeight || localHeight % 1000 === 0) {
+      console.log(`sync local=${localHeight} target=${targetHeight}`);
+    }
   }
 }

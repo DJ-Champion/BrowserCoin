@@ -279,6 +279,7 @@ Neither helper is an authority. Every block they accept is validated by the loca
 
 ```bash
 npm run miner:benchmark -- --workers 4 --duration 30
+npm run miner:mine -- --template-only --api https://api1.browsercoin.org
 npm run miner:mine -- --once --api http://localhost:9000 --workers 1
 npm run miner:mine -- --api http://localhost:9000 --workers 4 --txs
 npm run miner:check
@@ -288,7 +289,7 @@ npm run rust-core:build:release
 npm run miner:mine -- --backend rust --rust-core ./rust-core/target/release/browsercoin-rust-core --api http://localhost:9000
 ```
 
-The reference miner lives in `src/external-miner/` and intentionally imports the existing consensus helpers instead of reimplementing them: `encodeHeader`, `encodeBlock`, `decodeBlock`, `computeTxRoot`, `nextDifficulty`, `applyBlockTxs`, `stateRoot`, `compactToTarget`, `hashMeetsTarget`, and `powHash`. It mines reward-only blocks by default; `--txs` opts into helper mempool transaction inclusion through the same `Mempool.add` and `Mempool.selectForBlock` logic used by the browser miner. WebRTC mining and TypeScript orchestration of the Rust backend are future extensions.
+The reference miner lives in `src/external-miner/` and intentionally imports the existing consensus helpers instead of reimplementing them: `encodeHeader`, `encodeBlock`, `decodeBlock`, `computeTxRoot`, `nextDifficulty`, `applyBlockTxs`, `stateRoot`, `compactToTarget`, `hashMeetsTarget`, and `powHash`. It mines reward-only blocks by default; `--txs` opts into helper mempool transaction inclusion through the same `Mempool.add` and `Mempool.selectForBlock` logic used by the browser miner. Use `--template-only` for a read-only sync/template dry-run. Validated helper history is cached in `.external-miner-chain.json` by default; use `--no-cache` to force a cold sync. WebRTC mining and TypeScript orchestration of the Rust backend are future extensions.
 
 The optional Rust prototype in `rust-core/` is a standalone executable for the hot PoW path. It supports `hash --header <hex>` for compatibility checks and `mine --header <hex> --target <hex> --workers N` for nonce grinding. It must stay byte-for-byte compatible with TypeScript `powHash`; run `npm run rust-core:check` after changes.
 

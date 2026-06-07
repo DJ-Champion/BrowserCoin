@@ -5,6 +5,7 @@ dist
 .DS_Store
 .env
 .env.local
+.external-miner-chain.json
 server/dist
 server/chain.json
 server/backups-*/

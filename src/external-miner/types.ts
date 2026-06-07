@@ -9,10 +9,12 @@ export interface MinerConfig {
   command: MinerCommand;
   apiUrl: string;
   walletPath: string;
+  cachePath: string | null;
   workers: WorkerCountOption;
   statsIntervalSec: number;
   resyncIntervalSec: number;
   once: boolean;
+  templateOnly: boolean;
   includeTxs: boolean;
   backend: MiningBackend;
   rustCorePath: string | null;

@@ -97,6 +97,9 @@ npm run miner:mine -- --once --api http://localhost:9000 --workers 1
 # opt in to helper mempool transaction inclusion
 npm run miner:mine -- --api http://localhost:9000 --workers 4 --txs
 
+# sync/build a production candidate without mining or submitting
+npm run miner:mine -- --template-only --api https://api1.browsercoin.org
+
 # run a self-contained live check on a temporary helper port
 npm run miner:check
 
@@ -112,7 +115,7 @@ npm run miner:benchmark -- --backend rust --rust-core ./rust-core/target/release
 npm run miner:mine -- --backend rust --rust-core ./rust-core/target/release/browsercoin-rust-core --api http://localhost:9000
 ```
 
-The v1 external miner is intentionally boring: HTTP helper only, TypeScript orchestration, and reward-only blocks by default. `--txs` opts into helper mempool transaction inclusion through the existing `Mempool.selectForBlock` path. It writes `miner-wallet.json` by default and never overwrites an existing wallet.
+The v1 external miner is intentionally boring: HTTP helper only, TypeScript orchestration, and reward-only blocks by default. `--txs` opts into helper mempool transaction inclusion through the existing `Mempool.selectForBlock` path. It writes `miner-wallet.json` by default and never overwrites an existing wallet. It also caches validated helper history in `.external-miner-chain.json`; use `--no-cache` to force a cold sync or `--cache <path>` to isolate runs.
 
 An optional Rust prototype lives in `rust-core/`. It is a standalone executable for the hot PoW path, not a Node native addon. TypeScript remains the source of truth for chain sync, template construction, CLI handling, and submission. Omit `--rust-core` to use the development `cargo run` fallback; pass a release binary path for real benchmarking.
 
